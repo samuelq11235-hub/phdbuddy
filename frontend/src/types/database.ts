@@ -270,6 +270,21 @@ export interface CodebookSuggestionPayload {
   source_chars?: number;
   full_chars?: number;
   chunks?: number;
+  // Background job lifecycle. When true the suggestion row is a
+  // placeholder created by ai-auto-code while Claude is still working.
+  // The frontend polls until this flips to false.
+  processing?: boolean;
+  // Filled in when the background job crashed (rate limit, timeout,
+  // schema error). UI offers a retry CTA.
+  error?: string;
+  rate_limited?: boolean;
+  started_at?: string;
+  progress?: {
+    stage: "queued" | "codebook" | "quotations" | string;
+    chunks_done: number;
+    chunks_total: number;
+    waiting_ms?: number;
+  };
   // True when codebook generation (pass-1) was rate-limited and we
   // reused the project's existing codes instead of generating new ones.
   codebook_fallback?: boolean;

@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { Loader2, Sparkles, CheckCheck, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Loader2, Sparkles, CheckCheck, X, RotateCcw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -33,26 +33,87 @@ export function AutoCodeButton({
     [suggestions]
   );
 
+  // Three flavors of "pending":
+  //   - processing: background worker is still calling Claude; show a
+  //     spinner button with progress, no review dialog yet.
+  //   - error: background worker crashed (rate limit, schema, ...); show
+  //     a destructive button that re-runs on click.
+  //   - ready: payload has codes/quotations; show the review CTA.
+  const isProcessing = pending?.payload?.processing === true;
+  const hasError =
+    !!pending?.payload?.error && pending.payload.processing !== true;
+  const isReady = !!pending && !isProcessing && !hasError;
+
   const [selectedCodes, setSelectedCodes] = useState<Set<string>>(new Set());
   const [selectedQuoteIdx, setSelectedQuoteIdx] = useState<Set<number>>(new Set());
 
-  // Reset selection when a new suggestion comes in.
+  // Reset selection when a new suggestion comes in (only once it's ready).
   useEffect(() => {
-    if (pending) {
+    if (isReady && pending) {
       const payload = pending.payload as CodebookSuggestionPayload;
       setSelectedCodes(new Set((payload.codes ?? []).map((c) => c.name)));
       setSelectedQuoteIdx(new Set((payload.quotations ?? []).map((_, i) => i)));
     }
-  }, [pending?.id]);
+  }, [isReady, pending?.id]);
+
+  // Auto-open the review dialog the moment a job we just kicked off
+  // finishes — but don't do it on subsequent reloads where the user
+  // already saw the suggestion (they'll click the "Revisar" button).
+  const watchingJobId = useRef<string | null>(null);
+  useEffect(() => {
+    if (isProcessing && pending) watchingJobId.current = pending.id;
+  }, [isProcessing, pending?.id]);
+  useEffect(() => {
+    if (
+      isReady &&
+      pending &&
+      watchingJobId.current === pending.id
+    ) {
+      setOpen(true);
+      watchingJobId.current = null;
+      toast({
+        title: "Auto-codificación lista",
+        description: `${pending.payload.codes?.length ?? 0} códigos · ${
+          pending.payload.quotations?.length ?? 0
+        } citas para revisar.`,
+      });
+    }
+  }, [isReady, pending?.id]);
+
+  // Same idea but for failures: bubble up the error as a toast the
+  // moment the background job marks itself with payload.error.
+  useEffect(() => {
+    if (
+      hasError &&
+      pending &&
+      watchingJobId.current === pending.id
+    ) {
+      watchingJobId.current = null;
+      const message = pending.payload.error ?? "La auto-codificación falló";
+      const isRateLimit =
+        pending.payload.rate_limited === true ||
+        /rate.?limit/i.test(message) ||
+        /tokens? per minute/i.test(message);
+      toast({
+        variant: "destructive",
+        title: isRateLimit
+          ? "Anthropic está limitando tu uso"
+          : "Falló la auto-codificación",
+        description: isRateLimit
+          ? "Tu organización alcanzó el límite de tokens por minuto. Espera 60s y reintenta."
+          : message,
+      });
+    }
+  }, [hasError, pending?.id]);
 
   async function handleRun() {
     try {
+      // The edge function now responds in <1s with the placeholder row
+      // and runs the heavy work in the background. We don't open the
+      // dialog until the job actually has codes/quotes to review.
       await autoCode.mutateAsync(documentId);
-      setOpen(true);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Error desconocido";
-      // Anthropic rate-limit (429) — surface a friendlier action-oriented
-      // message so users don't think the document is corrupt.
       const isRateLimit =
         /rate.?limit/i.test(message) ||
         /429/.test(message) ||
@@ -63,8 +124,24 @@ export function AutoCodeButton({
           ? "Anthropic está limitando tu uso"
           : "Falló la auto-codificación",
         description: isRateLimit
-          ? "Tu organización en Anthropic alcanzó el límite de tokens por minuto. Espera 60 segundos y vuelve a intentarlo. Si el documento es muy largo, también puedes dividirlo."
+          ? "Tu organización alcanzó el límite de tokens por minuto. Espera 60s y reintenta. Si el documento es muy largo, divídelo en partes."
           : message,
+      });
+    }
+  }
+
+  async function handleRetry() {
+    if (!pending) return;
+    try {
+      // Mark the failed row as rejected before kicking off a new job so
+      // the UI doesn't show two pending rows side by side.
+      await rejectSuggestion.mutateAsync(pending.id);
+      await autoCode.mutateAsync(documentId);
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "No se pudo reintentar",
+        description: err instanceof Error ? err.message : undefined,
       });
     }
   }
@@ -105,9 +182,50 @@ export function AutoCodeButton({
     }
   }
 
+  const progressLabel = useMemo(() => {
+    if (!isProcessing || !pending) return null;
+    const p = pending.payload?.progress;
+    if (!p) return "Preparando…";
+    if (p.stage === "queued") return "En cola…";
+    if (p.stage === "codebook") return "Generando codebook…";
+    if (p.stage === "quotations") {
+      if (p.waiting_ms && p.waiting_ms > 1500) {
+        return `Esperando rate limit de Anthropic (${Math.round(p.waiting_ms / 1000)}s)…`;
+      }
+      if (p.chunks_total > 0) {
+        return `Extrayendo citas (${p.chunks_done}/${p.chunks_total})…`;
+      }
+      return "Extrayendo citas…";
+    }
+    return "Procesando…";
+  }, [isProcessing, pending]);
+
   return (
     <>
-      {pending ? (
+      {isProcessing ? (
+        <Button
+          variant="outline"
+          disabled
+          className="border-primary/40 bg-primary/5 text-primary"
+        >
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          {progressLabel ?? "Procesando…"}
+        </Button>
+      ) : hasError ? (
+        <Button
+          variant="outline"
+          onClick={handleRetry}
+          disabled={autoCode.isPending || rejectSuggestion.isPending}
+          className="border-destructive/40 bg-destructive/5 text-destructive hover:bg-destructive/10 hover:text-destructive"
+        >
+          {autoCode.isPending || rejectSuggestion.isPending ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <RotateCcw className="mr-2 h-4 w-4" />
+          )}
+          Reintentar auto-codificación
+        </Button>
+      ) : isReady ? (
         <Button
           variant="outline"
           onClick={() => setOpen(true)}
@@ -127,7 +245,7 @@ export function AutoCodeButton({
         </Button>
       )}
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open && isReady} onOpenChange={setOpen}>
         <DialogContent className="max-w-3xl">
           <DialogHeader>
             <DialogTitle>Sugerencias de auto-codificación con IA</DialogTitle>
@@ -137,7 +255,7 @@ export function AutoCodeButton({
             </DialogDescription>
           </DialogHeader>
 
-          {pending ? (
+          {isReady && pending ? (
             <ReviewPanel
               suggestion={pending as AISuggestion<CodebookSuggestionPayload>}
               selectedCodes={selectedCodes}
@@ -150,11 +268,11 @@ export function AutoCodeButton({
           )}
 
           <DialogFooter>
-            <Button variant="ghost" onClick={handleReject} disabled={!pending || rejectSuggestion.isPending}>
+            <Button variant="ghost" onClick={handleReject} disabled={!isReady || rejectSuggestion.isPending}>
               <X className="mr-2 h-4 w-4" />
               Rechazar todo
             </Button>
-            <Button onClick={handleApply} disabled={!pending || applySuggestion.isPending}>
+            <Button onClick={handleApply} disabled={!isReady || applySuggestion.isPending}>
               {applySuggestion.isPending ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               ) : (

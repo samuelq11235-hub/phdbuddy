@@ -1,16 +1,24 @@
 // Edge Function: ai-auto-code
-// Two-pass open coding with Claude:
-//   1. Generate the codebook (codes + project summary) from a sample of
-//      the document. One call, even for very long documents — the
-//      codebook should reflect dominant themes, not exhaustive coverage.
-//   2. Extract verbatim quotations and assign them to those codes.
-//      For documents <= SINGLE_PASS_CHARS this is one call. For longer
-//      documents the text is split into chunks and quotations are
-//      collected from every chunk with offsets adjusted to the full text.
+// Two-pass open coding with Claude — runs ASYNCHRONOUSLY:
+//   1. The HTTP handler validates the request, creates a `pending` row in
+//      ai_suggestions with payload.processing=true, and returns it
+//      immediately so the client can show a non-blocking spinner.
+//   2. The actual Claude work runs in EdgeRuntime.waitUntil() so the
+//      client connection can close even if the job takes minutes
+//      (Anthropic rate-limit waits, multiple chunks, etc.).
+//   3. When the job finishes (success or failure) we UPDATE the same row
+//      with the final payload. The frontend polls useDocumentSuggestions
+//      and renders the dialog as soon as payload.processing flips off.
 //
-// This means coverage scales with document length without ever blowing
-// past Claude's max_tokens or the edge function's wall-time on a single
-// call.
+// Why asynchronous?
+//   Supabase edge functions have a wall-clock budget (~150s by default).
+//   When Anthropic rate-limits us we may need to sleep ~60s between
+//   chunks; on a 3-chunk doc that easily blows the budget and the
+//   client-side fetch hangs until it 504s. The background-task pattern
+//   removes the wall-clock pressure entirely.
+
+// deno-lint-ignore no-explicit-any
+declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void };
 
 import { handlePreflight, jsonResponse, errorResponse } from "../_shared/cors.ts";
 import { getServiceClient, getUserFromRequest } from "../_shared/supabase.ts";
@@ -153,11 +161,121 @@ Deno.serve(async (req) => {
     return errorResponse("Document has not been processed yet", 400);
   }
 
+  // Discard any stale `processing` row from a previous attempt that
+  // crashed silently — otherwise the UI would forever think a job is
+  // running and never let the user retry.
+  await supabase
+    .from("ai_suggestions")
+    .delete()
+    .eq("document_id", documentId)
+    .eq("kind", "codebook")
+    .eq("status", "pending")
+    .filter("payload->>processing", "eq", "true");
+
+  const fullLength = doc.full_text.length;
+  const workingText = doc.full_text.slice(0, MAX_TOTAL_CHARS);
+  const truncated = fullLength > MAX_TOTAL_CHARS;
+
+  // Insert the placeholder suggestion FIRST so the client gets a row id
+  // it can poll. The actual heavy work runs in the background.
+  const { data: suggestion, error: insErr } = await supabase
+    .from("ai_suggestions")
+    .insert({
+      user_id: userId,
+      project_id: doc.project_id,
+      document_id: documentId,
+      kind: "codebook",
+      payload: {
+        summary: "",
+        codes: [],
+        quotations: [],
+        processing: true,
+        started_at: new Date().toISOString(),
+        source_chars: workingText.length,
+        full_chars: fullLength,
+        truncated,
+        chunks: 0,
+        // Hints the UI shows a "preparing" message instead of empty.
+        progress: {
+          stage: "queued",
+          chunks_done: 0,
+          chunks_total: 0,
+        },
+      },
+      status: "pending",
+      model: CLAUDE_MODEL,
+    })
+    .select()
+    .single();
+
+  if (insErr || !suggestion) {
+    console.error("[ai-auto-code] insert placeholder failed:", insErr);
+    return errorResponse(`Failed to start auto-code job: ${insErr?.message}`, 500);
+  }
+
+  console.log(
+    `[ai-auto-code] queued suggestion=${suggestion.id} doc=${documentId} ` +
+      `chars=${workingText.length} (full=${fullLength}) truncated=${truncated}`
+  );
+
+  // Run the heavy job in the background. EdgeRuntime keeps the worker
+  // alive past the response. Errors and progress are written back into
+  // the same row.
+  EdgeRuntime.waitUntil(
+    runAutoCodeJob({
+      supabase,
+      userId,
+      doc,
+      workingText,
+      fullLength,
+      truncated,
+      suggestionId: suggestion.id,
+    }).catch(async (err) => {
+      const message = err instanceof Error ? err.message : "auto-code job crashed";
+      console.error("[ai-auto-code] background crash:", message);
+      await supabase
+        .from("ai_suggestions")
+        .update({
+          payload: {
+            summary: "",
+            codes: [],
+            quotations: [],
+            processing: false,
+            error: message,
+          },
+        })
+        .eq("id", suggestion.id);
+    })
+  );
+
+  // Return the placeholder immediately so the client can start polling.
+  return jsonResponse({ ok: true, suggestion });
+});
+
+interface JobInput {
+  supabase: ReturnType<typeof getServiceClient>;
+  userId: string;
+  doc: {
+    id: string;
+    user_id: string;
+    project_id: string;
+    title: string;
+    kind: string | null;
+    full_text: string | null;
+  };
+  workingText: string;
+  fullLength: number;
+  truncated: boolean;
+  suggestionId: string;
+}
+
+async function runAutoCodeJob(input: JobInput) {
+  const { supabase, doc, workingText, fullLength, truncated, suggestionId } = input;
+
   const { data: project } = await supabase
     .from("projects")
     .select("id, name, research_question, methodology")
     .eq("id", doc.project_id)
-    .eq("user_id", userId)
     .single();
 
   const { data: existingCodes } = await supabase
@@ -165,17 +283,8 @@ Deno.serve(async (req) => {
     .select("name, description")
     .eq("project_id", doc.project_id);
 
-  const fullLength = doc.full_text.length;
-  const workingText = doc.full_text.slice(0, MAX_TOTAL_CHARS);
-  const truncated = fullLength > MAX_TOTAL_CHARS;
-
-  console.log(
-    `[ai-auto-code] doc=${documentId} chars=${workingText.length} (full=${fullLength}) ` +
-      `truncated=${truncated} existing_codes=${existingCodes?.length ?? 0}`
-  );
-
   // Cooperative rate-limit window: track recent input_tokens consumed
-  // by THIS request so we don't blow past the org's per-minute budget.
+  // by THIS job so we don't blow past the org's per-minute budget.
   const usageWindow: { ts: number; tokens: number }[] = [];
   function trackUsage(tokens: number) {
     const now = Date.now();
@@ -184,7 +293,7 @@ Deno.serve(async (req) => {
       usageWindow.shift();
     }
   }
-  async function awaitBudget(estimatedTokens: number) {
+  async function awaitBudget(estimatedTokens: number, onWait?: (ms: number) => void) {
     while (true) {
       const now = Date.now();
       while (usageWindow.length && now - usageWindow[0].ts > RATE_WINDOW_MS) {
@@ -192,19 +301,44 @@ Deno.serve(async (req) => {
       }
       const used = usageWindow.reduce((s, u) => s + u.tokens, 0);
       if (used + estimatedTokens <= TOKEN_BUDGET_PER_MIN) return;
-      // Wait until the oldest entry exits the window.
       const earliest = usageWindow[0];
       const waitMs = Math.max(500, RATE_WINDOW_MS - (now - earliest.ts) + 250);
       console.log(
         `[ai-auto-code] rate-limit wait ${waitMs}ms (used=${used} need=${estimatedTokens})`
       );
+      onWait?.(waitMs);
       await new Promise((r) => setTimeout(r, waitMs));
     }
   }
-  // Anthropic counts the entire prompt — system + tool schema + user.
-  // 4 chars/token is the conventional approximation for English text.
   const estimateTokens = (text: string): number =>
     Math.ceil(text.length / 4) + 600;
+
+  async function reportProgress(progress: {
+    stage: string;
+    chunks_done: number;
+    chunks_total: number;
+    waiting_ms?: number;
+  }) {
+    // Best-effort progress update; we don't await retries — the client
+    // will get the next progress write or the final payload anyway.
+    await supabase
+      .from("ai_suggestions")
+      .update({
+        payload: {
+          summary: "",
+          codes: [],
+          quotations: [],
+          processing: true,
+          progress,
+          source_chars: workingText.length,
+          full_chars: fullLength,
+          truncated,
+        },
+      })
+      .eq("id", suggestionId);
+  }
+
+  await reportProgress({ stage: "codebook", chunks_done: 0, chunks_total: 0 });
 
   // ---------- PASS 1: codebook from a representative sample ----------
   let codebook: CodebookOnly | null = null;
@@ -247,16 +381,26 @@ Deno.serve(async (req) => {
   } catch (err) {
     pass1Error = err instanceof Error ? err.message : "Claude pass-1 failed";
     console.error("[ai-auto-code] pass-1 failed:", pass1Error);
-    // Fail hard ONLY if we don't have any prior codebook to fall back
-    // on — otherwise we can still extract quotations against the
-    // existing project codes, which is way more useful than a 500.
     if (!existingCodes || existingCodes.length === 0) {
-      const status = err instanceof ClaudeRateLimitError ? 429 : 500;
-      return errorResponse(pass1Error, status);
+      // Nothing to fall back on — surface the error and stop.
+      await supabase
+        .from("ai_suggestions")
+        .update({
+          payload: {
+            summary: "",
+            codes: [],
+            quotations: [],
+            processing: false,
+            error: pass1Error,
+            rate_limited:
+              err instanceof ClaudeRateLimitError ? true : undefined,
+          },
+        })
+        .eq("id", suggestionId);
+      return;
     }
     console.log(
-      `[ai-auto-code] pass-1 fallback: skipping codebook generation, ` +
-        `reusing ${existingCodes.length} existing codes`
+      `[ai-auto-code] pass-1 fallback: reusing ${existingCodes.length} existing codes`
     );
   }
 
@@ -271,13 +415,25 @@ Deno.serve(async (req) => {
   // ---------- PASS 2: quotations from every chunk ----------
   const chunks = chunkDocument(workingText, SINGLE_PASS_CHARS);
   console.log(`[ai-auto-code] pass2 chunks=${chunks.length}`);
+  await reportProgress({
+    stage: "quotations",
+    chunks_done: 0,
+    chunks_total: chunks.length,
+  });
 
   const allQuotations: SuggestedQuotation[] = [];
   let pass2RateLimitedCount = 0;
   for (let i = 0; i < chunks.length; i++) {
     const { text: chunkText, startOffset } = chunks[i];
     try {
-      await awaitBudget(estimateTokens(chunkText));
+      await awaitBudget(estimateTokens(chunkText), async (waitMs) => {
+        await reportProgress({
+          stage: "quotations",
+          chunks_done: i,
+          chunks_total: chunks.length,
+          waiting_ms: waitMs,
+        });
+      });
       const r2 = await callClaudeTool<QuotationsOnly>(
         [
           {
@@ -304,7 +460,6 @@ Deno.serve(async (req) => {
       );
       trackUsage(r2.usage.input_tokens ?? estimateTokens(chunkText));
       const repaired = repairQuotations(chunkText, r2.data.quotations ?? []);
-      // Shift offsets so they map to the full document, not just the chunk.
       for (const q of repaired) {
         q.start_offset += startOffset;
         q.end_offset += startOffset;
@@ -315,18 +470,20 @@ Deno.serve(async (req) => {
           `stop=${r2.stopReason}`
       );
       allQuotations.push(...repaired);
+      await reportProgress({
+        stage: "quotations",
+        chunks_done: i + 1,
+        chunks_total: chunks.length,
+      });
     } catch (err) {
       if (err instanceof ClaudeRateLimitError) pass2RateLimitedCount++;
       console.error(
         `[ai-auto-code] pass2 chunk ${i + 1}/${chunks.length} failed:`,
         err instanceof Error ? err.message : err
       );
-      // Keep going so a single bad chunk doesn't lose the whole batch.
     }
   }
 
-  // Dedupe quotations that overlap heavily (the chunk overlap can cause
-  // the same span to surface twice).
   const dedupedQuotations = dedupeQuotations(allQuotations);
 
   const cleanPayload: AutoCodePayload = {
@@ -339,56 +496,57 @@ Deno.serve(async (req) => {
     quotations: dedupedQuotations,
   };
 
-  // If pass-1 failed AND every pass-2 chunk also failed, there's nothing
-  // to save — surface the original error instead of a 200 with empty
-  // payload, which is what was creating the "no me coge citas" UX.
+  // If we have absolutely nothing to show, surface a clear error instead
+  // of a misleading "0 codes / 0 citations" empty success.
   if (!codebook && allQuotations.length === 0) {
-    return errorResponse(
-      pass1Error ??
-        "Anthropic devolvió 0 citas en todos los chunks (probablemente por rate limit). Espera un minuto y reintenta.",
-      pass2RateLimitedCount > 0 ? 429 : 500
-    );
+    await supabase
+      .from("ai_suggestions")
+      .update({
+        payload: {
+          summary: "",
+          codes: [],
+          quotations: [],
+          processing: false,
+          error:
+            pass1Error ??
+            "Anthropic devolvió 0 citas en todos los chunks (rate limit). Espera un minuto y reintenta.",
+          rate_limited_chunks: pass2RateLimitedCount,
+        },
+        model: model ?? CLAUDE_MODEL,
+      })
+      .eq("id", suggestionId);
+    return;
   }
 
   console.log(
     `[ai-auto-code] final codes=${cleanPayload.codes.length} ` +
       `quotes=${cleanPayload.quotations.length} ` +
-      `(from ${allQuotations.length} raw, rate_limited_chunks=${pass2RateLimitedCount})`
+      `(rate_limited_chunks=${pass2RateLimitedCount})`
   );
 
-  const { data: suggestion, error: insErr } = await supabase
+  const { error: updErr } = await supabase
     .from("ai_suggestions")
-    .insert({
-      user_id: userId,
-      project_id: doc.project_id,
-      document_id: documentId,
-      kind: "codebook",
+    .update({
       payload: {
         ...cleanPayload,
         truncated,
         source_chars: workingText.length,
         full_chars: fullLength,
         chunks: chunks.length,
-        // Tell the UI we used the existing codebook because pass-1 was
-        // rate-limited; lets it explain why no new codes appear.
         codebook_fallback: codebook === null,
         rate_limited_chunks: pass2RateLimitedCount,
+        processing: false,
       },
-      status: "pending",
       model: model ?? CLAUDE_MODEL,
     })
-    .select()
-    .single();
+    .eq("id", suggestionId);
 
-  if (insErr) {
-    console.error("[ai-auto-code] insert ai_suggestions failed:", insErr);
-    return errorResponse(`Failed to save suggestion: ${insErr.message}`, 500);
+  if (updErr) {
+    console.error("[ai-auto-code] final update failed:", updErr);
+  } else {
+    console.log(`[ai-auto-code] suggestion ${suggestionId} ready`);
   }
-
-  console.log(`[ai-auto-code] saved suggestion ${suggestion.id}`);
-
-  return jsonResponse({ ok: true, suggestion });
-});
+}
 
 interface RawQuote {
   start_offset?: number;

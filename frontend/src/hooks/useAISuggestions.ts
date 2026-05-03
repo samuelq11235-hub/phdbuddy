@@ -40,6 +40,15 @@ export function useDocumentSuggestions(documentId: string | undefined) {
       return data as AISuggestion<CodebookSuggestionPayload>[];
     },
     enabled: !!documentId,
+    // While the latest pending suggestion is still processing, poll the
+    // row every 4s so the UI picks up progress updates and the final
+    // payload as soon as the background job writes them.
+    refetchInterval: (query) => {
+      const rows = query.state.data as AISuggestion<CodebookSuggestionPayload>[] | undefined;
+      const latest = rows?.find((r) => r.status === "pending");
+      return latest?.payload?.processing ? 4000 : false;
+    },
+    refetchIntervalInBackground: true,
   });
 }
 
