@@ -270,6 +270,11 @@ export interface CodebookSuggestionPayload {
   source_chars?: number;
   full_chars?: number;
   chunks?: number;
+  // True when codebook generation (pass-1) was rate-limited and we
+  // reused the project's existing codes instead of generating new ones.
+  codebook_fallback?: boolean;
+  // Number of chunks in pass-2 that hit the Anthropic rate limit.
+  rate_limited_chunks?: number;
 }
 
 export interface ThemeSuggestionPayload {

@@ -50,10 +50,21 @@ export function AutoCodeButton({
       await autoCode.mutateAsync(documentId);
       setOpen(true);
     } catch (err) {
+      const message = err instanceof Error ? err.message : "Error desconocido";
+      // Anthropic rate-limit (429) — surface a friendlier action-oriented
+      // message so users don't think the document is corrupt.
+      const isRateLimit =
+        /rate.?limit/i.test(message) ||
+        /429/.test(message) ||
+        /tokens? per minute/i.test(message);
       toast({
         variant: "destructive",
-        title: "Falló la auto-codificación",
-        description: err instanceof Error ? err.message : undefined,
+        title: isRateLimit
+          ? "Anthropic está limitando tu uso"
+          : "Falló la auto-codificación",
+        description: isRateLimit
+          ? "Tu organización en Anthropic alcanzó el límite de tokens por minuto. Espera 60 segundos y vuelve a intentarlo. Si el documento es muy largo, también puedes dividirlo."
+          : message,
       });
     }
   }
@@ -186,8 +197,23 @@ function ReviewPanel({
     setSelectedQuoteIdx(next);
   }
 
+  const rateLimitWarning =
+    payload.codebook_fallback || (payload.rate_limited_chunks ?? 0) > 0;
+
   return (
     <div className="max-h-[60vh] space-y-5 overflow-y-auto pr-1">
+      {rateLimitWarning && (
+        <div className="rounded-md border border-amber-300/50 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-950/40 dark:text-amber-200">
+          <strong>Resultado parcial.</strong>{" "}
+          {payload.codebook_fallback
+            ? "Se reutilizó el codebook existente del proyecto porque la generación nueva fue limitada por Anthropic. "
+            : null}
+          {(payload.rate_limited_chunks ?? 0) > 0
+            ? `${payload.rate_limited_chunks} fragmento(s) del documento no se pudieron procesar por límite de tokens. `
+            : null}
+          Espera ~60 segundos y vuelve a ejecutar la auto-codificación para completar la cobertura.
+        </div>
+      )}
       {payload.summary && (
         <div className="rounded-md border bg-muted/20 px-3 py-2 text-sm italic text-muted-foreground">
           {payload.summary}

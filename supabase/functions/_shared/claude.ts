@@ -1,6 +1,12 @@
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const DEFAULT_MODEL = "claude-sonnet-4-5-20250929";
 
+// Retries automatically respect the `retry-after` header (in seconds) when
+// the API returns a 429 (rate limit) or 529 (overloaded) response. Capped
+// so a stuck job can't sit in an edge function for an hour.
+const MAX_RETRIES = 4;
+const MAX_RETRY_WAIT_MS = 75_000;
+
 export interface ClaudeMessage {
   role: "user" | "assistant";
   content: string;
@@ -11,6 +17,51 @@ export interface ClaudeOptions {
   model?: string;
   maxTokens?: number;
   temperature?: number;
+}
+
+/** Thrown when a request can't be retried any further. Allows callers
+ *  (e.g. ai-auto-code) to react differently to rate-limit errors than
+ *  to schema/auth errors without parsing string messages. */
+export class ClaudeRateLimitError extends Error {
+  constructor(message: string, public readonly retryAfterMs: number | null) {
+    super(message);
+    this.name = "ClaudeRateLimitError";
+  }
+}
+
+async function fetchClaudeWithRetry(
+  body: Record<string, unknown>,
+  apiKey: string,
+  attempt = 0
+): Promise<Response> {
+  const res = await fetch(ANTHROPIC_API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify(body),
+  });
+
+  // Retry on rate-limit (429) and overload (529). Anthropic sets
+  // retry-after when it knows when to come back; otherwise back off
+  // exponentially with jitter.
+  const isRetryable = res.status === 429 || res.status === 529;
+  if (!isRetryable || attempt >= MAX_RETRIES) return res;
+
+  const retryAfterHeader = res.headers.get("retry-after");
+  let waitMs = retryAfterHeader ? Math.ceil(Number(retryAfterHeader) * 1000) : NaN;
+  if (!Number.isFinite(waitMs) || waitMs <= 0) {
+    waitMs = Math.min(60_000, 2_000 * Math.pow(2, attempt)) + Math.floor(Math.random() * 500);
+  }
+  waitMs = Math.min(waitMs, MAX_RETRY_WAIT_MS);
+
+  console.warn(
+    `[claude] ${res.status} rate-limited, retry ${attempt + 1}/${MAX_RETRIES} in ${waitMs}ms`
+  );
+  await new Promise((r) => setTimeout(r, waitMs));
+  return fetchClaudeWithRetry(body, apiKey, attempt + 1);
 }
 
 export interface ClaudeResponse {
@@ -40,19 +91,11 @@ export async function callClaude(
     messages,
   };
 
-  const res = await fetch(ANTHROPIC_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify(body),
-  });
+  const res = await fetchClaudeWithRetry(body, apiKey);
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Anthropic API error ${res.status}: ${text}`);
+    throw rateLimitOrGenericError(res.status, text);
   }
 
   const data = await res.json();
@@ -63,6 +106,29 @@ export async function callClaude(
     stopReason: data.stop_reason ?? "unknown",
     usage: data.usage,
   };
+}
+
+function rateLimitOrGenericError(status: number, body: string): Error {
+  if (status === 429 || status === 529) {
+    // Anthropic embeds the rate limit details in the JSON body. Surface
+    // them to the caller so the UI can render a friendly message.
+    let retryAfterMs: number | null = null;
+    try {
+      const parsed = JSON.parse(body) as { error?: { message?: string } };
+      const ms = /try again in\s+(\d+)\s*ms/i.exec(parsed?.error?.message ?? "");
+      const sec = /try again in\s+(\d+)\s*s/i.exec(parsed?.error?.message ?? "");
+      if (ms) retryAfterMs = parseInt(ms[1], 10);
+      else if (sec) retryAfterMs = parseInt(sec[1], 10) * 1000;
+    } catch {
+      /* ignore */
+    }
+    const friendly =
+      status === 429
+        ? "Tu organización en Anthropic alcanzó el límite de tokens por minuto. Espera un minuto y vuelve a intentarlo, o sube tu plan."
+        : "El servicio de Anthropic está saturado en este momento. Reintentalo en unos segundos.";
+    return new ClaudeRateLimitError(`${friendly} (${status})`, retryAfterMs);
+  }
+  return new Error(`Anthropic API error ${status}: ${body}`);
 }
 
 /**
@@ -118,19 +184,11 @@ export async function callClaudeTool<T>(
   };
 
   const startedAt = Date.now();
-  const res = await fetch(ANTHROPIC_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify(body),
-  });
+  const res = await fetchClaudeWithRetry(body, apiKey);
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Anthropic API error ${res.status}: ${text}`);
+    throw rateLimitOrGenericError(res.status, text);
   }
 
   const data = await res.json();

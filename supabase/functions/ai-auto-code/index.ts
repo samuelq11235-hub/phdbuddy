@@ -14,7 +14,11 @@
 
 import { handlePreflight, jsonResponse, errorResponse } from "../_shared/cors.ts";
 import { getServiceClient, getUserFromRequest } from "../_shared/supabase.ts";
-import { callClaudeTool, CLAUDE_MODEL } from "../_shared/claude.ts";
+import {
+  callClaudeTool,
+  CLAUDE_MODEL,
+  ClaudeRateLimitError,
+} from "../_shared/claude.ts";
 import {
   AUTO_CODE_SYSTEM_PROMPT,
   autoCodePrompt,
@@ -27,16 +31,26 @@ interface RequestBody {
   documentId: string;
 }
 
-// Sweet spot: ~25K tokens of input → fast (~20-30s), high quality,
-// well below the 200K context window of Sonnet 4.5.
-const SINGLE_PASS_CHARS = 100_000;
+// Per-chunk budget — sized to fit comfortably under Anthropic's default
+// 30K input-tokens-per-minute limit when combined with the system prompt,
+// the codebook in the user prompt, and tool schema overhead.
+//   ~60K chars ≈ 15K tokens of document text
+// + ~ 4K  tokens of system + codebook + scaffold + tool schema
+// = ~19K tokens per call → leaves >10K tokens of headroom each minute.
+const SINGLE_PASS_CHARS = 60_000;
 // Hard cap: even with chunking, processing very long documents takes a
 // long time. 600K chars (≈90 pages of dense prose) is a sensible MVP
 // upper bound that fits in the 400s edge function wall-time budget.
 const MAX_TOTAL_CHARS = 600_000;
 // Codebook generation always uses the first slice of the document; that
 // is plenty to identify the dominant themes/codes.
-const CODEBOOK_SAMPLE_CHARS = 80_000;
+const CODEBOOK_SAMPLE_CHARS = 50_000;
+// Cooperative client-side rate limit. Anthropic's defaults (free / Tier 1
+// / Tier 2 orgs) are 30K input tokens/min for Sonnet. We watch the
+// running 60-second window of input_tokens we've consumed and pause the
+// next call until enough budget has freed up.
+const TOKEN_BUDGET_PER_MIN = 28_000;
+const RATE_WINDOW_MS = 60_000;
 
 const CODEBOOK_TOOL_SCHEMA = {
   type: "object",
@@ -160,11 +174,45 @@ Deno.serve(async (req) => {
       `truncated=${truncated} existing_codes=${existingCodes?.length ?? 0}`
   );
 
+  // Cooperative rate-limit window: track recent input_tokens consumed
+  // by THIS request so we don't blow past the org's per-minute budget.
+  const usageWindow: { ts: number; tokens: number }[] = [];
+  function trackUsage(tokens: number) {
+    const now = Date.now();
+    usageWindow.push({ ts: now, tokens });
+    while (usageWindow.length && now - usageWindow[0].ts > RATE_WINDOW_MS) {
+      usageWindow.shift();
+    }
+  }
+  async function awaitBudget(estimatedTokens: number) {
+    while (true) {
+      const now = Date.now();
+      while (usageWindow.length && now - usageWindow[0].ts > RATE_WINDOW_MS) {
+        usageWindow.shift();
+      }
+      const used = usageWindow.reduce((s, u) => s + u.tokens, 0);
+      if (used + estimatedTokens <= TOKEN_BUDGET_PER_MIN) return;
+      // Wait until the oldest entry exits the window.
+      const earliest = usageWindow[0];
+      const waitMs = Math.max(500, RATE_WINDOW_MS - (now - earliest.ts) + 250);
+      console.log(
+        `[ai-auto-code] rate-limit wait ${waitMs}ms (used=${used} need=${estimatedTokens})`
+      );
+      await new Promise((r) => setTimeout(r, waitMs));
+    }
+  }
+  // Anthropic counts the entire prompt — system + tool schema + user.
+  // 4 chars/token is the conventional approximation for English text.
+  const estimateTokens = (text: string): number =>
+    Math.ceil(text.length / 4) + 600;
+
   // ---------- PASS 1: codebook from a representative sample ----------
-  let codebook: CodebookOnly;
-  let model: string;
+  let codebook: CodebookOnly | null = null;
+  let model = CLAUDE_MODEL;
+  let pass1Error: string | null = null;
   try {
     const sample = workingText.slice(0, CODEBOOK_SAMPLE_CHARS);
+    await awaitBudget(estimateTokens(sample));
     const r1 = await callClaudeTool<CodebookOnly>(
       [
         {
@@ -191,18 +239,30 @@ Deno.serve(async (req) => {
     );
     codebook = r1.data;
     model = r1.model;
+    trackUsage(r1.usage.input_tokens ?? estimateTokens(sample));
     console.log(
-      `[ai-auto-code] pass1 codes=${codebook.codes?.length ?? 0} stop=${r1.stopReason}`
+      `[ai-auto-code] pass1 codes=${codebook.codes?.length ?? 0} ` +
+        `in_tokens=${r1.usage.input_tokens} stop=${r1.stopReason}`
     );
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Claude pass-1 failed";
-    console.error("[ai-auto-code] pass-1 failed:", message);
-    return errorResponse(message, 500);
+    pass1Error = err instanceof Error ? err.message : "Claude pass-1 failed";
+    console.error("[ai-auto-code] pass-1 failed:", pass1Error);
+    // Fail hard ONLY if we don't have any prior codebook to fall back
+    // on — otherwise we can still extract quotations against the
+    // existing project codes, which is way more useful than a 500.
+    if (!existingCodes || existingCodes.length === 0) {
+      const status = err instanceof ClaudeRateLimitError ? 429 : 500;
+      return errorResponse(pass1Error, status);
+    }
+    console.log(
+      `[ai-auto-code] pass-1 fallback: skipping codebook generation, ` +
+        `reusing ${existingCodes.length} existing codes`
+    );
   }
 
   const unionCodebook = dedupeCodes([
     ...(existingCodes ?? []).map((c) => ({ name: c.name, description: c.description ?? null })),
-    ...(codebook.codes ?? []).map((c) => ({
+    ...((codebook?.codes ?? []) as SuggestedCode[]).map((c) => ({
       name: c.name,
       description: c.description ?? null,
     })),
@@ -213,9 +273,11 @@ Deno.serve(async (req) => {
   console.log(`[ai-auto-code] pass2 chunks=${chunks.length}`);
 
   const allQuotations: SuggestedQuotation[] = [];
+  let pass2RateLimitedCount = 0;
   for (let i = 0; i < chunks.length; i++) {
     const { text: chunkText, startOffset } = chunks[i];
     try {
+      await awaitBudget(estimateTokens(chunkText));
       const r2 = await callClaudeTool<QuotationsOnly>(
         [
           {
@@ -236,10 +298,11 @@ Deno.serve(async (req) => {
           toolDescription:
             "Devuelve las citas literales seleccionadas y los códigos asignados.",
           inputSchema: QUOTATIONS_TOOL_SCHEMA,
-          maxTokens: 12000,
+          maxTokens: 8000,
           temperature: 0.2,
         }
       );
+      trackUsage(r2.usage.input_tokens ?? estimateTokens(chunkText));
       const repaired = repairQuotations(chunkText, r2.data.quotations ?? []);
       // Shift offsets so they map to the full document, not just the chunk.
       for (const q of repaired) {
@@ -248,10 +311,12 @@ Deno.serve(async (req) => {
       }
       console.log(
         `[ai-auto-code] pass2 chunk ${i + 1}/${chunks.length}: ` +
-          `quotes=${repaired.length} stop=${r2.stopReason}`
+          `quotes=${repaired.length} in_tokens=${r2.usage.input_tokens} ` +
+          `stop=${r2.stopReason}`
       );
       allQuotations.push(...repaired);
     } catch (err) {
+      if (err instanceof ClaudeRateLimitError) pass2RateLimitedCount++;
       console.error(
         `[ai-auto-code] pass2 chunk ${i + 1}/${chunks.length} failed:`,
         err instanceof Error ? err.message : err
@@ -265,8 +330,8 @@ Deno.serve(async (req) => {
   const dedupedQuotations = dedupeQuotations(allQuotations);
 
   const cleanPayload: AutoCodePayload = {
-    summary: codebook.summary ?? "",
-    codes: (codebook.codes ?? []).map((c) => ({
+    summary: codebook?.summary ?? "",
+    codes: (codebook?.codes ?? []).map((c) => ({
       name: c.name?.trim() || "Untitled",
       description: c.description?.trim(),
       color: c.color,
@@ -274,10 +339,21 @@ Deno.serve(async (req) => {
     quotations: dedupedQuotations,
   };
 
+  // If pass-1 failed AND every pass-2 chunk also failed, there's nothing
+  // to save — surface the original error instead of a 200 with empty
+  // payload, which is what was creating the "no me coge citas" UX.
+  if (!codebook && allQuotations.length === 0) {
+    return errorResponse(
+      pass1Error ??
+        "Anthropic devolvió 0 citas en todos los chunks (probablemente por rate limit). Espera un minuto y reintenta.",
+      pass2RateLimitedCount > 0 ? 429 : 500
+    );
+  }
+
   console.log(
     `[ai-auto-code] final codes=${cleanPayload.codes.length} ` +
       `quotes=${cleanPayload.quotations.length} ` +
-      `(from ${allQuotations.length} raw)`
+      `(from ${allQuotations.length} raw, rate_limited_chunks=${pass2RateLimitedCount})`
   );
 
   const { data: suggestion, error: insErr } = await supabase
@@ -293,6 +369,10 @@ Deno.serve(async (req) => {
         source_chars: workingText.length,
         full_chars: fullLength,
         chunks: chunks.length,
+        // Tell the UI we used the existing codebook because pass-1 was
+        // rate-limited; lets it explain why no new codes appear.
+        codebook_fallback: codebook === null,
+        rate_limited_chunks: pass2RateLimitedCount,
       },
       status: "pending",
       model: model ?? CLAUDE_MODEL,
