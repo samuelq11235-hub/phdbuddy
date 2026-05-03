@@ -106,6 +106,20 @@ export const api = {
       args
     );
   },
+
+  suggestRelations(args: { networkId: string; codeIds: string[] }) {
+    return invoke<{
+      ok: true;
+      suggestionId: string;
+      model: string;
+      relations: {
+        source_code_id: string;
+        target_code_id: string;
+        relation_type_name: string;
+        rationale: string;
+      }[];
+    }>("suggest-relations", args);
+  },
 };
 
 export async function uploadDocumentFile(

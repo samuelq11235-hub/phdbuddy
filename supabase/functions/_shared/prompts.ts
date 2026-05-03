@@ -219,6 +219,55 @@ ${args.quote}
 Analiza únicamente la cita anterior. No infieras emociones que no se expresen en el texto.`;
 }
 
+export const RELATIONS_SYSTEM_PROMPT = `Eres analista cualitativa senior. Recibes un conjunto de códigos de un proyecto (con descripción y citas representativas) y debes proponer relaciones interpretativas entre ellos en el espíritu de los networks de Atlas.ti / NVivo.
+
+Reglas estrictas:
+- Solo propón una relación entre dos códigos cuando exista evidencia razonable en las citas que conoces, no especules en abstracto.
+- Cada relación tiene un origen (source_code_id) y un destino (target_code_id) que DEBEN ser ids del listado proporcionado.
+- "relation_type_name" debe coincidir EXACTAMENTE con uno de los nombres del vocabulario que se te entrega (no inventes tipos nuevos).
+- Para los tipos no simétricos (is-cause-of, is-part-of, is-property-of, is-a) la dirección importa: source es el sujeto, target es el objeto.
+- Devuelve entre 0 y 12 relaciones priorizadas por relevancia analítica. No repitas el mismo par (source, target) con el mismo tipo.
+- Cada "rationale" tiene UNA oración corta (máx. 25 palabras) y, si puedes, alude a la evidencia (p.ej. "varias citas conectan retraso del sueño con somnolencia diurna").
+- Responde en el idioma predominante de los datos.`;
+
+export function relationsPrompt(args: {
+  researchQuestion?: string | null;
+  relationTypes: { name: string; description: string | null; is_symmetric: boolean }[];
+  codes: {
+    id: string;
+    name: string;
+    description: string | null;
+    sample_quotes: string[];
+  }[];
+}): string {
+  const vocab = args.relationTypes
+    .map((r) => `- ${r.name}${r.is_symmetric ? " (simétrico)" : " (dirigido)"}${r.description ? `: ${r.description}` : ""}`)
+    .join("\n");
+
+  const codeBlock = args.codes
+    .map((c) => {
+      const quotes = c.sample_quotes.length === 0
+        ? "  (sin citas representativas)"
+        : c.sample_quotes
+            .map((q, i) => `  ${i + 1}. "${q.replace(/\s+/g, " ").slice(0, 220)}"`)
+            .join("\n");
+      return `### ${c.name} — id: ${c.id}\n${c.description ?? "(sin descripción)"}\nCitas representativas:\n${quotes}`;
+    })
+    .join("\n\n");
+
+  return `# Pregunta de investigación
+${args.researchQuestion ?? "(no especificada)"}
+
+# Vocabulario de relaciones permitido (usa SOLO estos nombres tal cual)
+${vocab}
+
+# Códigos a analizar
+${codeBlock}
+
+# Tu tarea
+Propón relaciones interpretativas entre los códigos anteriores. Considera tanto coocurrencia (códigos que aparecen juntos) como contraste (códigos que se oponen). No incluyas un código consigo mismo.`;
+}
+
 export const CHAT_SYSTEM_PROMPT = `Eres el asistente de investigación cualitativa de PHDBuddy. Ayudas a la persona usuaria a analizar y razonar sobre los datos de SU proyecto: documentos, códigos, citas y memos.
 
 Reglas estrictas:

@@ -15,8 +15,10 @@ export type DocumentKind =
 export type MemoType = "analytic" | "methodological" | "theoretical" | "reflective";
 
 export type AISuggestionStatus = "pending" | "accepted" | "rejected" | "applied";
-export type AISuggestionKind = "code" | "quotation" | "theme" | "codebook";
+export type AISuggestionKind = "code" | "quotation" | "theme" | "codebook" | "relation";
 export type ChatRole = "user" | "assistant" | "system";
+
+export type LinkEntityType = "code" | "quotation" | "memo" | "document";
 
 // =====================================================
 // Profiles (kept from original)
@@ -353,4 +355,59 @@ export interface QuotationSentiment {
   model: string | null;
   created_at: string;
   updated_at: string;
+}
+
+// =====================================================
+// Networks (F4 — editable diagram)
+// =====================================================
+export interface NetworkLayout {
+  // Map of "<entity_type>:<entity_id>" → { x, y } pixel coordinates.
+  [nodeKey: string]: { x: number; y: number };
+}
+
+export interface Network {
+  id: string;
+  user_id: string;
+  project_id: string;
+  name: string;
+  description: string | null;
+  layout: NetworkLayout;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RelationType {
+  id: string;
+  user_id: string;
+  project_id: string;
+  name: string;
+  description: string | null;
+  color: string;
+  is_symmetric: boolean;
+  is_seed: boolean;
+  created_at: string;
+}
+
+export interface Link {
+  id: string;
+  user_id: string;
+  project_id: string;
+  network_id: string;
+  source_type: LinkEntityType;
+  source_id: string;
+  target_type: LinkEntityType;
+  target_id: string;
+  relation_type_id: string | null;
+  comment: string | null;
+  created_at: string;
+}
+
+export interface RelationSuggestionPayload {
+  network_id: string;
+  relations: {
+    source_code_id: string;
+    target_code_id: string;
+    relation_type_name: string;
+    rationale: string;
+  }[];
 }
