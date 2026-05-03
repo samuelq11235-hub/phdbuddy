@@ -8,6 +8,7 @@ import {
   Network as NetworkIcon,
   Sparkles,
   ArrowLeft,
+  LayoutGrid,
 } from "lucide-react";
 
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -16,12 +17,13 @@ import { Button } from "@/components/ui/button";
 import { useProject } from "@/hooks/useProjects";
 import { DocumentsPanel } from "@/components/documents/DocumentsPanel";
 import { CodebookPanel } from "@/components/codes/CodebookPanel";
+import { CodeDocumentMatrix } from "@/components/codes/CodeDocumentMatrix";
 import { QuotationsPanel } from "@/components/quotations/QuotationsPanel";
 import { MemosPanel } from "@/components/memos/MemosPanel";
 import { CodeNetworkPanel } from "@/components/network/CodeNetworkPanel";
 import { ChatPanel } from "@/components/ai/ChatPanel";
 
-const VALID_TABS = ["documents", "codes", "quotations", "memos", "network", "chat"] as const;
+const VALID_TABS = ["documents", "codes", "quotations", "matrix", "memos", "network", "chat"] as const;
 type TabId = (typeof VALID_TABS)[number];
 
 export default function ProjectWorkspacePage() {
@@ -100,6 +102,7 @@ export default function ProjectWorkspacePage() {
           <TabTrigger value="documents" icon={FileText}>Documentos</TabTrigger>
           <TabTrigger value="codes" icon={Tags}>Codebook</TabTrigger>
           <TabTrigger value="quotations" icon={Quote}>Citas</TabTrigger>
+          <TabTrigger value="matrix" icon={LayoutGrid}>Matriz</TabTrigger>
           <TabTrigger value="memos" icon={NotebookPen}>Memos</TabTrigger>
           <TabTrigger value="network" icon={NetworkIcon}>Red</TabTrigger>
           <TabTrigger value="chat" icon={Sparkles}>Chat IA</TabTrigger>
@@ -114,6 +117,9 @@ export default function ProjectWorkspacePage() {
           </TabsContent>
           <TabsContent value="quotations">
             <QuotationsPanel projectId={projectId} />
+          </TabsContent>
+          <TabsContent value="matrix">
+            <CodeDocumentMatrix projectId={projectId} />
           </TabsContent>
           <TabsContent value="memos">
             <MemosPanel projectId={projectId} />

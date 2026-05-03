@@ -5,14 +5,17 @@ import { Button } from "@/components/ui/button";
 import { CodeBadge } from "@/components/codes/CodeBadge";
 import { useDeleteQuotation, useToggleCoding, type QuotationWithCodes } from "@/hooks/useQuotations";
 import { useToast } from "@/hooks/use-toast";
+import { sentimentColor, sentimentLabelEs } from "@/hooks/useSentiment";
+import type { QuotationSentiment } from "@/types/database";
 
 interface Props {
   quotation: QuotationWithCodes;
   projectId: string;
   showDocumentLink?: boolean;
+  sentiment?: QuotationSentiment;
 }
 
-export function QuotationCard({ quotation, projectId, showDocumentLink = true }: Props) {
+export function QuotationCard({ quotation, projectId, showDocumentLink = true, sentiment }: Props) {
   const deleteQ = useDeleteQuotation();
   const toggleCoding = useToggleCoding();
   const { toast } = useToast();
@@ -47,6 +50,23 @@ export function QuotationCard({ quotation, projectId, showDocumentLink = true }:
           <Quote className="h-3.5 w-3.5 text-white" />
         </div>
         <div className="min-w-0 flex-1">
+          {sentiment && (
+            <div className="mb-1.5 flex items-center gap-1.5 text-[11px]">
+              <span
+                className="inline-block h-2 w-2 rounded-full"
+                style={{ backgroundColor: sentimentColor(sentiment.label) }}
+                title={`Polaridad ${sentiment.polarity.toFixed(2)}`}
+              />
+              <span className="font-medium text-muted-foreground">
+                {sentimentLabelEs(sentiment.label)}
+              </span>
+              {sentiment.emotions.length > 0 && (
+                <span className="text-muted-foreground/70">
+                  · {sentiment.emotions.slice(0, 3).join(", ")}
+                </span>
+              )}
+            </div>
+          )}
           <p className="leading-relaxed text-foreground">
             <span className="text-muted-foreground">&ldquo;</span>
             {quotation.content}

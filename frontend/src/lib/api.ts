@@ -87,6 +87,19 @@ export const api = {
     return invoke<{ ok: true }>("embed-quotation", { quotationId });
   },
 
+  analyzeSentiment(args: {
+    quotationIds?: string[];
+    projectId?: string;
+    limit?: number;
+  }) {
+    return invoke<{
+      ok: true;
+      analyzed: number;
+      failed?: number;
+      results: { quotationId: string; ok: boolean; label?: string; polarity?: number; error?: string }[];
+    }>("analyze-sentiment", args);
+  },
+
   chat(args: { projectId: string; sessionId?: string; question: string }) {
     return invoke<{ ok: true; sessionId: string; message: ChatMessage; model: string }>(
       "project-chat",

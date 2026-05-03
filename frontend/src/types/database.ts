@@ -322,3 +322,35 @@ export interface CodeCooccurrenceRow {
   code_b: string;
   occurrences: number;
 }
+
+// =====================================================
+// Code-Document matrix (RPC return shape)
+// =====================================================
+export interface CodeDocumentMatrixRow {
+  code_id: string;
+  document_id: string;
+  count: number;
+}
+
+// =====================================================
+// Quotation sentiment (F3)
+// =====================================================
+export type SentimentLabel = "positive" | "negative" | "neutral" | "mixed";
+
+export interface SentimentAspect {
+  aspect: string;
+  polarity: number;
+}
+
+export interface QuotationSentiment {
+  quotation_id: string;
+  user_id: string;
+  project_id: string;
+  polarity: number;
+  label: SentimentLabel;
+  aspects: SentimentAspect[];
+  emotions: string[];
+  model: string | null;
+  created_at: string;
+  updated_at: string;
+}

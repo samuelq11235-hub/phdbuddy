@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/useAuth";
-import type { Code, CodeCooccurrenceRow } from "@/types/database";
+import type { Code, CodeCooccurrenceRow, CodeDocumentMatrixRow } from "@/types/database";
 
 export interface CodeNode extends Code {
   children: CodeNode[];
@@ -118,6 +118,21 @@ export function useCodeCooccurrence(projectId: string | undefined) {
       });
       if (error) throw error;
       return (data ?? []) as CodeCooccurrenceRow[];
+    },
+    enabled: !!projectId,
+  });
+}
+
+export function useCodeDocumentMatrix(projectId: string | undefined) {
+  return useQuery({
+    queryKey: ["code-document-matrix", projectId],
+    queryFn: async () => {
+      if (!projectId) return [];
+      const { data, error } = await supabase.rpc("code_document_matrix", {
+        p_project_id: projectId,
+      });
+      if (error) throw error;
+      return (data ?? []) as CodeDocumentMatrixRow[];
     },
     enabled: !!projectId,
   });

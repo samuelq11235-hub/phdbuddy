@@ -191,6 +191,34 @@ Para cada cluster devuelve ÚNICAMENTE un JSON:
 }`;
 }
 
+export const SENTIMENT_SYSTEM_PROMPT = `Eres analista cualitativa de minería de opinión. Recibes una cita extraída de un documento de investigación y devuelves su valoración afectiva. Sé neutral y conservadora: solo asigna polaridades extremas cuando el lenguaje es inequívoco. Responde siempre en el idioma de la cita.
+
+Reglas:
+- "polarity" es un número en [-1, 1]: -1 muy negativo, 0 neutro, 1 muy positivo. Reserva los extremos para enunciados con afecto explícito y sostenido.
+- "label" toma uno de: "positive", "negative", "neutral", "mixed". Usa "mixed" SOLO si la cita expresa simultáneamente afectos opuestos sobre aspectos distintos.
+- "aspects" lista hasta 3 entidades/temas concretos del enunciado con su polaridad propia (mismo rango). Omite si la cita es genérica.
+- "emotions" lista hasta 3 emociones primarias detectadas (ira, tristeza, alegría, miedo, sorpresa, asco, esperanza, frustración…). Omite si no hay emoción discernible.`;
+
+export function sentimentPrompt(args: {
+  quote: string;
+  documentTitle: string;
+  documentKind: string;
+  contextBefore?: string;
+  contextAfter?: string;
+}): string {
+  const ctx = [args.contextBefore, args.contextAfter].filter(Boolean).join(" […] ");
+  return `# Contexto
+Documento: "${args.documentTitle}" (tipo: ${args.documentKind})
+${ctx ? `Texto circundante (NO analices esto, solo desambigua):\n"""${ctx.slice(0, 600)}"""` : ""}
+
+# Cita a analizar
+"""
+${args.quote}
+"""
+
+Analiza únicamente la cita anterior. No infieras emociones que no se expresen en el texto.`;
+}
+
 export const CHAT_SYSTEM_PROMPT = `Eres el asistente de investigación cualitativa de PHDBuddy. Ayudas a la persona usuaria a analizar y razonar sobre los datos de SU proyecto: documentos, códigos, citas y memos.
 
 Reglas estrictas:
