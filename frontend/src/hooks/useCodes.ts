@@ -3,7 +3,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/useAuth";
-import type { Code, CodeCooccurrenceRow, CodeDocumentMatrixRow } from "@/types/database";
+import { api } from "@/lib/api";
+import type {
+  Code,
+  CodeCooccurrenceRow,
+  CodeDocumentMatrixRow,
+  CodeNetworkResponse,
+  DocumentForCodeRow,
+  SharedQuotationRow,
+} from "@/types/database";
 
 export interface CodeNode extends Code {
   children: CodeNode[];
@@ -120,6 +128,93 @@ export function useCodeCooccurrence(projectId: string | undefined) {
       return (data ?? []) as CodeCooccurrenceRow[];
     },
     enabled: !!projectId,
+  });
+}
+
+export interface CodeNetworkFilters {
+  codeGroupId?: string | null;
+  minWeight?: number;
+  limitTopEdges?: number;
+}
+
+export function useCodeNetwork(
+  projectId: string | undefined,
+  filters: CodeNetworkFilters = {}
+) {
+  // The cooccurrence graph is derived from quotation_codes — so the
+  // cache key must change whenever (a) filters change OR (b) we know the
+  // upstream data changed. TanStack Query already invalidates this key
+  // from useCreateQuotation / useDeleteCode etc. via the existing
+  // invalidations on ["code-cooccurrence", projectId]; we mirror that
+  // here so updates propagate without a manual refetch.
+  return useQuery({
+    queryKey: [
+      "code-network",
+      projectId,
+      filters.codeGroupId ?? null,
+      filters.minWeight ?? 1,
+      filters.limitTopEdges ?? 0,
+    ],
+    queryFn: async (): Promise<CodeNetworkResponse> => {
+      if (!projectId) {
+        return {
+          ok: true,
+          projectId: "",
+          generatedAt: new Date().toISOString(),
+          stats: { nodeCount: 0, edgeCount: 0, totalQuotations: 0 },
+          nodes: [],
+          edges: [],
+        };
+      }
+      return api.fetchCodeNetwork({
+        projectId,
+        codeGroupId: filters.codeGroupId ?? undefined,
+        minWeight: filters.minWeight,
+        limitTopEdges: filters.limitTopEdges,
+      });
+    },
+    enabled: !!projectId,
+    staleTime: 1000 * 30,
+  });
+}
+
+export function useSharedQuotations(
+  projectId: string | undefined,
+  codeA: string | null | undefined,
+  codeB: string | null | undefined
+) {
+  return useQuery({
+    queryKey: ["shared-quotations", projectId, codeA, codeB],
+    queryFn: async () => {
+      if (!projectId || !codeA || !codeB) return [] as SharedQuotationRow[];
+      const { data, error } = await supabase.rpc("shared_quotations_for_code_pair", {
+        p_project_id: projectId,
+        p_code_a: codeA,
+        p_code_b: codeB,
+      });
+      if (error) throw error;
+      return (data ?? []) as SharedQuotationRow[];
+    },
+    enabled: !!projectId && !!codeA && !!codeB,
+  });
+}
+
+export function useDocumentsForCode(
+  projectId: string | undefined,
+  codeId: string | null | undefined
+) {
+  return useQuery({
+    queryKey: ["documents-for-code", projectId, codeId],
+    queryFn: async () => {
+      if (!projectId || !codeId) return [] as DocumentForCodeRow[];
+      const { data, error } = await supabase.rpc("documents_for_code", {
+        p_project_id: projectId,
+        p_code_id: codeId,
+      });
+      if (error) throw error;
+      return (data ?? []) as DocumentForCodeRow[];
+    },
+    enabled: !!projectId && !!codeId,
   });
 }
 

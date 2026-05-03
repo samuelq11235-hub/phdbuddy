@@ -411,3 +411,55 @@ export interface RelationSuggestionPayload {
     rationale: string;
   }[];
 }
+
+// =====================================================
+// Code Co-occurrence Network (edge function code-network)
+// =====================================================
+export interface CodeNetworkNode {
+  id: string;
+  label: string;
+  size: number;
+  color: string;
+  parent_id: string | null;
+}
+
+export interface CodeNetworkEdge {
+  source: string;
+  target: string;
+  weight: number;
+}
+
+export interface CodeNetworkResponse {
+  ok: true;
+  projectId: string;
+  generatedAt: string;
+  stats: { nodeCount: number; edgeCount: number; totalQuotations: number };
+  nodes: CodeNetworkNode[];
+  edges: CodeNetworkEdge[];
+  notice?: string;
+}
+
+// =====================================================
+// Shared quotations between two codes (RPC return shape)
+// =====================================================
+export interface SharedQuotationRow {
+  quotation_id: string;
+  document_id: string;
+  document_title: string;
+  start_offset: number;
+  end_offset: number;
+  content: string;
+  comment: string | null;
+  created_at: string;
+}
+
+// =====================================================
+// Documents linked to a code (RPC return shape)
+// =====================================================
+export interface DocumentForCodeRow {
+  document_id: string;
+  document_title: string;
+  document_kind: DocumentKind;
+  quotation_count: number;
+  last_quoted_at: string | null;
+}

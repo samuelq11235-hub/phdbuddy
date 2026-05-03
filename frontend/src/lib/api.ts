@@ -3,6 +3,7 @@ import type {
   AISuggestion,
   CodebookSuggestionPayload,
   ChatMessage,
+  CodeNetworkResponse,
   ThemeSuggestionPayload,
 } from "@/types/database";
 
@@ -105,6 +106,15 @@ export const api = {
       "project-chat",
       args
     );
+  },
+
+  fetchCodeNetwork(args: {
+    projectId: string;
+    codeGroupId?: string | null;
+    minWeight?: number;
+    limitTopEdges?: number;
+  }) {
+    return invoke<CodeNetworkResponse>("code-network", args);
   },
 
   suggestRelations(args: { networkId: string; codeIds: string[] }) {

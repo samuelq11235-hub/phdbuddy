@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { ArrowLeft, AlertCircle, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,8 @@ import { useToast } from "@/hooks/use-toast";
 
 export default function DocumentViewerPage() {
   const { projectId, documentId } = useParams<{ projectId: string; documentId: string }>();
+  const [searchParams] = useSearchParams();
+  const highlightQuotationId = searchParams.get("quotation") ?? undefined;
   const { data: document, isLoading } = useDocument(documentId);
   const { data: quotations } = useDocumentQuotations(documentId);
   const reprocess = useReprocessDocument();
@@ -118,6 +120,7 @@ export default function DocumentViewerPage() {
             quotations={quotations ?? []}
             projectId={projectId}
             documentId={documentId}
+            highlightQuotationId={highlightQuotationId}
           />
         </article>
       )}
