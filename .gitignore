@@ -1,0 +1,100 @@
+# =====================================================
+# Build artifacts & dependencies
+# =====================================================
+node_modules/
+dist/
+build/
+.next/
+out/
+
+# =====================================================
+# Environment & secrets
+# =====================================================
+.env
+.env.local
+.env.*.local
+supabase/.env
+
+# =====================================================
+# Personal scratch / data (never commit user data)
+# =====================================================
+phd.txt
+*.pdf
+!frontend/**/*.pdf
+*.png
+*.jpg
+*.jpeg
+*.webp
+!frontend/**/*.png
+!frontend/**/*.svg
+!frontend/public/**
+
+# =====================================================
+# OS / editor noise
+# =====================================================
+.DS_Store
+*.log
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# =====================================================
+# Supabase local state
+# =====================================================
+supabase/.branches
+supabase/.temp
+
+# =====================================================
+# AI agents / IDE plugins (local config — never share)
+# =====================================================
+.adal/
+.agents/
+.aider-desk/
+.augment/
+.bob/
+.claude/
+.codeartsdoer/
+.codebuddy/
+.codemaker/
+.codestudio/
+.commandcode/
+.continue/
+.cortex/
+.crush/
+.cursor/
+.devin/
+.factory/
+.forge/
+.goose/
+.iflow/
+.junie/
+.kilocode/
+.kiro/
+.kode/
+.mcpjam/
+.mux/
+.neovate/
+.openhands/
+.pi/
+.pochi/
+.qoder/
+.qwen/
+.roo/
+.rovodev/
+.tabnine/
+.trae/
+.vibe/
+.windsurf/
+.zencoder/
+
+# Project-level MCP config (may reference local env tokens)
+.mcp.json
+.cursor/mcp.json
+
+# Cached agent skills (auto-installed; tracked via skills-lock.json if needed)
+skills/

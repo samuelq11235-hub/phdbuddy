@@ -1,0 +1,17 @@
+{
+  "name": "phdbuddy",
+  "private": true,
+  "version": "0.2.0",
+  "description": "AI-native qualitative analysis (CAQDAS) workspace. Frontend in /frontend, Supabase backend in /supabase.",
+  "scripts": {
+    "supabase": "supabase",
+    "db:push": "supabase db push",
+    "db:reset": "supabase db reset",
+    "fn:deploy:all": "supabase functions deploy process-document && supabase functions deploy ai-auto-code && supabase functions deploy apply-suggestion && supabase functions deploy suggest-codes-for-quote && supabase functions deploy cluster-themes && supabase functions deploy project-chat && supabase functions deploy embed-quotation",
+    "secrets:set": "supabase secrets set --env-file supabase/.env",
+    "dev": "npm --prefix frontend run dev"
+  },
+  "devDependencies": {
+    "supabase": "^2.98.0"
+  }
+}
