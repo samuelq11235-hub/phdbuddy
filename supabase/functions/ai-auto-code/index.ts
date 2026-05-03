@@ -39,26 +39,35 @@ interface RequestBody {
   documentId: string;
 }
 
-// Per-chunk budget — sized to fit comfortably under Anthropic's default
-// 30K input-tokens-per-minute limit when combined with the system prompt,
-// the codebook in the user prompt, and tool schema overhead.
-//   ~60K chars ≈ 15K tokens of document text
-// + ~ 4K  tokens of system + codebook + scaffold + tool schema
-// = ~19K tokens per call → leaves >10K tokens of headroom each minute.
-const SINGLE_PASS_CHARS = 60_000;
+// Per-chunk budget — sized so that THREE consecutive calls (codebook +
+// 2 chunks) always fit inside Anthropic's default 30K input-tokens-per-
+// minute window. The previous 60K-char chunks were ~16K tokens each,
+// which meant ANY two-chunk document had to sit and wait 60s.
+//
+//   ~22K chars ≈ 6K tokens of document text (real ratio ~3.7-3.8)
+// + ~ 1.5K     of system + codebook + scaffold + tool schema
+// = ~ 7.5K tokens per call → 3+ calls/min fits cleanly under 30K.
+const SINGLE_PASS_CHARS = 22_000;
 // Hard cap: even with chunking, processing very long documents takes a
 // long time. 600K chars (≈90 pages of dense prose) is a sensible MVP
 // upper bound that fits in the 400s edge function wall-time budget.
 const MAX_TOTAL_CHARS = 600_000;
 // Codebook generation always uses the first slice of the document; that
-// is plenty to identify the dominant themes/codes.
-const CODEBOOK_SAMPLE_CHARS = 50_000;
+// is plenty to identify the dominant themes/codes. 18K chars is enough
+// representative material without eating the per-minute budget.
+const CODEBOOK_SAMPLE_CHARS = 18_000;
 // Cooperative client-side rate limit. Anthropic's defaults (free / Tier 1
 // / Tier 2 orgs) are 30K input tokens/min for Sonnet. We watch the
 // running 60-second window of input_tokens we've consumed and pause the
-// next call until enough budget has freed up.
-const TOKEN_BUDGET_PER_MIN = 28_000;
+// next call until enough budget has freed up. Setting this just below
+// the hard limit gives headroom for token-count estimation noise.
+const TOKEN_BUDGET_PER_MIN = 27_000;
 const RATE_WINDOW_MS = 60_000;
+// Approximation: Spanish + JSON tool schemas average ~3.4 chars/token.
+// 4 was too pessimistic and caused us to think we were over budget when
+// we actually weren't. Tuned against real usage logs.
+const CHARS_PER_TOKEN_ESTIMATE = 3.6;
+const PROMPT_OVERHEAD_TOKENS = 400;
 
 const CODEBOOK_TOOL_SCHEMA = {
   type: "object",
@@ -301,6 +310,16 @@ async function runAutoCodeJob(input: JobInput) {
       }
       const used = usageWindow.reduce((s, u) => s + u.tokens, 0);
       if (used + estimatedTokens <= TOKEN_BUDGET_PER_MIN) return;
+      // If a single call exceeds the per-minute budget by itself there's
+      // no wait that will make it fit — let the request go through and
+      // rely on Anthropic's own 429 + Retry-After to handle it.
+      if (usageWindow.length === 0) {
+        console.warn(
+          `[ai-auto-code] estimated ${estimatedTokens} tokens exceeds ` +
+            `per-minute budget (${TOKEN_BUDGET_PER_MIN}); proceeding anyway`
+        );
+        return;
+      }
       const earliest = usageWindow[0];
       const waitMs = Math.max(500, RATE_WINDOW_MS - (now - earliest.ts) + 250);
       console.log(
@@ -311,7 +330,7 @@ async function runAutoCodeJob(input: JobInput) {
     }
   }
   const estimateTokens = (text: string): number =>
-    Math.ceil(text.length / 4) + 600;
+    Math.ceil(text.length / CHARS_PER_TOKEN_ESTIMATE) + PROMPT_OVERHEAD_TOKENS;
 
   async function reportProgress(progress: {
     stage: string;
