@@ -492,19 +492,33 @@ async function runAutoCodeJob(input: JobInput) {
         (r2.usage.input_tokens ?? 0) +
         (r2.usage.cache_creation_input_tokens ?? 0);
       trackUsage(billable || estimateTokens(chunkText));
-      const repaired = repairQuotations(chunkText, r2.data.quotations ?? []);
+      const rawQuotes = r2.data.quotations ?? [];
+      const repaired = repairQuotations(chunkText, rawQuotes);
       for (const q of repaired) {
         q.start_offset += startOffset;
         q.end_offset += startOffset;
       }
+      // Surface the gap between what the model proposed vs what we
+      // could actually anchor in the text — this was the silent
+      // failure mode that left users with codes but zero citations.
       console.log(
         `[ai-auto-code] pass2 chunk ${i + 1}/${chunks.length}: ` +
-          `quotes=${repaired.length} ` +
+          `raw=${rawQuotes.length} kept=${repaired.length} ` +
           `in=${r2.usage.input_tokens} ` +
           `cache_r=${r2.usage.cache_read_input_tokens ?? 0} ` +
           `cache_w=${r2.usage.cache_creation_input_tokens ?? 0} ` +
           `stop=${r2.stopReason}`
       );
+      if (rawQuotes.length > 0 && repaired.length === 0) {
+        // Dump a single sample so we can see exactly what shape the
+        // model returned next time we hit this. Truncated to keep log
+        // lines under Supabase's 32K line limit.
+        const sample = JSON.stringify(rawQuotes[0]).slice(0, 400);
+        console.warn(
+          `[ai-auto-code] all ${rawQuotes.length} raw quotes were dropped ` +
+            `by repairQuotations. Sample: ${sample}`
+        );
+      }
       allQuotations.push(...repaired);
       await reportProgress({
         stage: "quotations",
@@ -592,30 +606,122 @@ interface RawQuote {
 }
 
 /**
+ * Normalisation that's tolerant to the cosmetic differences Claude
+ * reliably introduces when echoing text back:
+ *   - smart quotes "" '' « » to plain " '
+ *   - en/em dash — – to plain -
+ *   - any run of whitespace (incl. \r\n, NBSP, \t) to a single space
+ *   - leading/trailing whitespace stripped
+ *
+ * We build the normalised string AND a parallel index mapping each
+ * normalised char back to the index it originated from in the source
+ * text, so once we find a match we can recover REAL offsets.
+ */
+function normalizeForMatch(s: string): { norm: string; map: number[] } {
+  const norm: string[] = [];
+  const map: number[] = [];
+  let prevWasSpace = false;
+  for (let i = 0; i < s.length; i++) {
+    let ch = s[i];
+    // Smart-quote / dash / NBSP normalisation.
+    if (ch === "\u201C" || ch === "\u201D" || ch === "\u00AB" || ch === "\u00BB") ch = '"';
+    else if (ch === "\u2018" || ch === "\u2019" || ch === "\u2032") ch = "'";
+    else if (ch === "\u2014" || ch === "\u2013") ch = "-";
+    else if (ch === "\u00A0" || ch === "\u202F") ch = " ";
+
+    const isSpace = /\s/.test(ch);
+    if (isSpace) {
+      if (prevWasSpace) continue;
+      norm.push(" ");
+      map.push(i);
+      prevWasSpace = true;
+    } else {
+      norm.push(ch);
+      map.push(i);
+      prevWasSpace = false;
+    }
+  }
+  // Trim leading space.
+  while (norm.length && norm[0] === " ") {
+    norm.shift();
+    map.shift();
+  }
+  // Trim trailing space.
+  while (norm.length && norm[norm.length - 1] === " ") {
+    norm.pop();
+    map.pop();
+  }
+  return { norm: norm.join(""), map };
+}
+
+/**
  * Locate each model-returned quotation in the chunk text and assign
  * character offsets. We no longer ask Claude for the offsets — they're
- * unreliable and waste tokens. Instead we search by content (with a
- * head-prefix fallback for quotes the model paraphrased slightly).
+ * unreliable and waste tokens. Instead we search by content with
+ * progressively more permissive matching:
+ *   1. Exact substring (fast path, hits ~70% of the time).
+ *   2. Normalised whitespace + smart-quote/dash forgiveness.
+ *   3. Head-prefix anchor (catches mild paraphrase).
  */
 function repairQuotations(text: string, quotes: RawQuote[]) {
   const out: NonNullable<AutoCodePayload["quotations"]> = [];
+  let dropped = 0;
+  let normalised: { norm: string; map: number[] } | null = null;
+
   for (const q of quotes) {
     const content = (q.content ?? "").trim();
-    if (!content || !Array.isArray(q.code_names) || q.code_names.length === 0) continue;
+    if (!content || !Array.isArray(q.code_names) || q.code_names.length === 0) {
+      dropped++;
+      continue;
+    }
 
+    // 1. Exact match.
     let start = text.indexOf(content);
     let end: number;
-    if (start === -1) {
-      // Fallback: try the first ~120 chars as an anchor, then take the
-      // model's claimed length from there. Catches minor whitespace or
-      // punctuation paraphrases.
-      const head = content.slice(0, Math.min(120, content.length));
-      const altFound = text.indexOf(head);
-      if (altFound === -1) continue;
-      start = altFound;
-      end = Math.min(text.length, altFound + content.length);
-    } else {
+    if (start !== -1) {
       end = start + content.length;
+    } else {
+      // 2. Normalised match. Build the source map lazily — only the
+      // first miss pays the cost.
+      if (!normalised) normalised = normalizeForMatch(text);
+      const { norm: cNorm } = normalizeForMatch(content);
+      if (cNorm.length === 0) {
+        dropped++;
+        continue;
+      }
+      const normIdx = normalised.norm.indexOf(cNorm);
+      if (normIdx !== -1) {
+        // Map normalised offsets back to the original text. The map
+        // gives the source index of each normalised char; we want
+        // the inclusive start and the source index AFTER the last
+        // normalised char of the match.
+        start = normalised.map[normIdx];
+        const lastNormIdx = normIdx + cNorm.length - 1;
+        const lastSrcIdx = normalised.map[lastNormIdx];
+        end = lastSrcIdx + 1;
+      } else {
+        // 3. Last-resort anchor on the first ~120 chars.
+        const head = content.slice(0, Math.min(120, content.length));
+        const altFound = text.indexOf(head);
+        if (altFound === -1) {
+          // Try the head against the normalised text too.
+          const { norm: headNorm } = normalizeForMatch(head);
+          if (headNorm.length === 0) {
+            dropped++;
+            continue;
+          }
+          const altNorm = normalised.norm.indexOf(headNorm);
+          if (altNorm === -1) {
+            dropped++;
+            continue;
+          }
+          start = normalised.map[altNorm];
+          end = Math.min(text.length, start + content.length);
+        } else {
+          start = altFound;
+          end = altFound + content.length;
+        }
+      }
     }
 
     out.push({
@@ -626,6 +732,12 @@ function repairQuotations(text: string, quotes: RawQuote[]) {
       code_names: q.code_names.map((n) => n.trim()).filter(Boolean),
       confidence: typeof q.confidence === "number" ? q.confidence : undefined,
     });
+  }
+  if (dropped > 0) {
+    console.warn(
+      `[ai-auto-code] repairQuotations dropped ${dropped}/${quotes.length} ` +
+        `quotes that could not be located in the chunk text`
+    );
   }
   return out;
 }
