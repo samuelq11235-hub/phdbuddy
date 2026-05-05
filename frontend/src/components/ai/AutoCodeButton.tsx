@@ -90,18 +90,27 @@ export function AutoCodeButton({
     ) {
       watchingJobId.current = null;
       const message = pending.payload.error ?? "La auto-codificación falló";
+      const isCreditError =
+        /credit balance/i.test(message) ||
+        /insufficient.*credit/i.test(message) ||
+        /Plans.*Billing/i.test(message);
       const isRateLimit =
-        pending.payload.rate_limited === true ||
-        /rate.?limit/i.test(message) ||
-        /tokens? per minute/i.test(message);
+        !isCreditError &&
+        (pending.payload.rate_limited === true ||
+          /rate.?limit/i.test(message) ||
+          /tokens? per minute/i.test(message));
       toast({
         variant: "destructive",
-        title: isRateLimit
-          ? "Anthropic está limitando tu uso"
-          : "Falló la auto-codificación",
-        description: isRateLimit
-          ? "Tu organización alcanzó el límite de tokens por minuto. Espera 60s y reintenta."
-          : message,
+        title: isCreditError
+          ? "Sin saldo en Anthropic"
+          : isRateLimit
+            ? "Anthropic está limitando tu uso"
+            : "Falló la auto-codificación",
+        description: isCreditError
+          ? "Tu cuenta de Anthropic se ha quedado sin créditos. Añade saldo en console.anthropic.com → Plans & Billing y reintenta."
+          : isRateLimit
+            ? "Tu organización alcanzó el límite de tokens por minuto. Espera 60s y reintenta."
+            : message,
       });
     }
   }, [hasError, pending?.id]);
@@ -212,19 +221,11 @@ export function AutoCodeButton({
           {progressLabel ?? "Procesando…"}
         </Button>
       ) : hasError ? (
-        <Button
-          variant="outline"
-          onClick={handleRetry}
-          disabled={autoCode.isPending || rejectSuggestion.isPending}
-          className="border-destructive/40 bg-destructive/5 text-destructive hover:bg-destructive/10 hover:text-destructive"
-        >
-          {autoCode.isPending || rejectSuggestion.isPending ? (
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          ) : (
-            <RotateCcw className="mr-2 h-4 w-4" />
-          )}
-          Reintentar auto-codificación
-        </Button>
+        <ErrorBanner
+          error={pending?.payload.error ?? "Error desconocido"}
+          onRetry={handleRetry}
+          retrying={autoCode.isPending || rejectSuggestion.isPending}
+        />
       ) : isReady ? (
         <Button
           variant="outline"
@@ -284,6 +285,74 @@ export function AutoCodeButton({
         </DialogContent>
       </Dialog>
     </>
+  );
+}
+
+function ErrorBanner({
+  error,
+  onRetry,
+  retrying,
+}: {
+  error: string;
+  onRetry: () => void;
+  retrying: boolean;
+}) {
+  // Categorise the error so the message is actionable instead of dumping
+  // a raw Anthropic JSON blob on the user.
+  const isCreditError =
+    /credit balance/i.test(error) ||
+    /insufficient.*credit/i.test(error) ||
+    /Plans.*Billing/i.test(error);
+  const isRateLimit =
+    !isCreditError &&
+    (/rate.?limit/i.test(error) || /tokens? per minute/i.test(error));
+
+  const title = isCreditError
+    ? "Sin saldo en Anthropic"
+    : isRateLimit
+      ? "Anthropic limitó el uso"
+      : "Falló la auto-codificación";
+  const description = isCreditError ? (
+    <>
+      Tu cuenta de Anthropic se ha quedado sin créditos. Añade saldo en{" "}
+      <a
+        href="https://console.anthropic.com/settings/billing"
+        target="_blank"
+        rel="noreferrer"
+        className="underline underline-offset-2"
+      >
+        console.anthropic.com → Plans &amp; Billing
+      </a>{" "}
+      y vuelve a intentarlo.
+    </>
+  ) : isRateLimit ? (
+    "Espera ~60 segundos a que Anthropic libere el rate limit y reintenta."
+  ) : (
+    error.length > 200 ? error.slice(0, 200) + "…" : error
+  );
+
+  return (
+    <div className="flex max-w-md items-start gap-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+      <div className="min-w-0 flex-1">
+        <div className="font-medium">{title}</div>
+        <div className="mt-0.5 text-xs opacity-90">{description}</div>
+      </div>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={onRetry}
+        disabled={retrying || isCreditError}
+        className="shrink-0 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+        title={isCreditError ? "Añade saldo antes de reintentar" : undefined}
+      >
+        {retrying ? (
+          <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <RotateCcw className="mr-2 h-3.5 w-3.5" />
+        )}
+        Reintentar
+      </Button>
+    </div>
   );
 }
 
