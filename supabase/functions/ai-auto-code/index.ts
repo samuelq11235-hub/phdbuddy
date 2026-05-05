@@ -39,23 +39,23 @@ interface RequestBody {
   documentId: string;
 }
 
-// Per-chunk budget — sized so that THREE consecutive calls (codebook +
-// 2 chunks) always fit inside Anthropic's default 30K input-tokens-per-
-// minute window. The previous 60K-char chunks were ~16K tokens each,
-// which meant ANY two-chunk document had to sit and wait 60s.
+// Per-call budget — sized so that 3-4 consecutive calls (codebook + 2-3
+// chunks) fit inside Anthropic's default 30K input-tokens/min window
+// even with worst-case prose density (3.5 chars/token in Spanish).
 //
-//   ~22K chars ≈ 6K tokens of document text (real ratio ~3.7-3.8)
-// + ~ 1.5K     of system + codebook + scaffold + tool schema
-// = ~ 7.5K tokens per call → 3+ calls/min fits cleanly under 30K.
-const SINGLE_PASS_CHARS = 22_000;
+//   28K chars ≈ 8.0K tokens of doc text (3.5 chars/tok worst case)
+// + ~600 tokens of trimmed prompt + tool schema + codebook (~20 names)
+// = ~8.6K tokens per pass-2 call.
+// Pass-1 (24K codebook sample) ≈ 7.5K tokens.
+// Total: codebook + 2 chunks ≈ 23-24K tokens, leaves ~6K headroom.
+const SINGLE_PASS_CHARS = 28_000;
 // Hard cap: even with chunking, processing very long documents takes a
 // long time. 600K chars (≈90 pages of dense prose) is a sensible MVP
 // upper bound that fits in the 400s edge function wall-time budget.
 const MAX_TOTAL_CHARS = 600_000;
 // Codebook generation always uses the first slice of the document; that
-// is plenty to identify the dominant themes/codes. 18K chars is enough
-// representative material without eating the per-minute budget.
-const CODEBOOK_SAMPLE_CHARS = 18_000;
+// is plenty to identify the dominant themes/codes.
+const CODEBOOK_SAMPLE_CHARS = 24_000;
 // Cooperative client-side rate limit. Anthropic's defaults (free / Tier 1
 // / Tier 2 orgs) are 30K input tokens/min for Sonnet. We watch the
 // running 60-second window of input_tokens we've consumed and pause the
@@ -69,24 +69,23 @@ const RATE_WINDOW_MS = 60_000;
 const CHARS_PER_TOKEN_ESTIMATE = 3.6;
 const PROMPT_OVERHEAD_TOKENS = 400;
 
+// Compact schemas: minimal property descriptions, no redundant
+// constraints already in the prompt. Drop start/end offsets — the model
+// never gets them right; repairQuotations() finds them via indexOf().
 const CODEBOOK_TOOL_SCHEMA = {
   type: "object",
   required: ["summary", "codes"],
   properties: {
-    summary: {
-      type: "string",
-      description: "Un párrafo (máx. 80 palabras) describiendo los temas dominantes.",
-    },
+    summary: { type: "string" },
     codes: {
       type: "array",
-      description: "Libro de códigos inicial (8-20 códigos, máx. 25).",
       items: {
         type: "object",
         required: ["name"],
         properties: {
-          name: { type: "string", description: "Etiqueta corta (2-5 palabras)." },
-          description: { type: "string", description: "Una sola oración corta (máx. 20 palabras)." },
-          color: { type: "string", description: "Color hexadecimal opcional (#RRGGBB)." },
+          name: { type: "string" },
+          description: { type: "string" },
+          color: { type: "string" },
         },
       },
     },
@@ -99,25 +98,14 @@ const QUOTATIONS_TOOL_SCHEMA = {
   properties: {
     quotations: {
       type: "array",
-      description:
-        "Citas literales del texto que respaldan los códigos del codebook proporcionado.",
       items: {
         type: "object",
-        required: ["start_offset", "end_offset", "content", "code_names"],
+        required: ["content", "code_names"],
         properties: {
-          start_offset: { type: "integer", description: "Offset de carácter (basado en 0)." },
-          end_offset: { type: "integer", description: "Offset de carácter (exclusivo)." },
-          content: {
-            type: "string",
-            description: "Subcadena literal del texto (1-4 oraciones, 15-200 palabras).",
-          },
-          rationale: { type: "string", description: "Una oración explicando por qué importa." },
-          code_names: {
-            type: "array",
-            items: { type: "string" },
-            description: "Códigos del codebook proporcionado.",
-          },
-          confidence: { type: "number", description: "Confianza entre 0 y 1." },
+          content: { type: "string" },
+          rationale: { type: "string" },
+          code_names: { type: "array", items: { type: "string" } },
+          confidence: { type: "number" },
         },
       },
     },
@@ -388,14 +376,29 @@ async function runAutoCodeJob(input: JobInput) {
         inputSchema: CODEBOOK_TOOL_SCHEMA,
         maxTokens: 4000,
         temperature: 0.2,
+        // Cache the system prompt + tool schema. Pass-1 only runs once
+        // per job so this is a cache-write only; the savings come on
+        // future jobs that run within 5 minutes of each other.
+        cachePrompt: true,
       }
     );
     codebook = r1.data;
     model = r1.model;
-    trackUsage(r1.usage.input_tokens ?? estimateTokens(sample));
+    // Cached prefix tokens DON'T count against the per-minute Anthropic
+    // rate limit, so the rate limiter only needs to track the
+    // non-cached portion (input_tokens already excludes cache reads;
+    // cache_creation_input_tokens IS counted by Anthropic the first
+    // time but we conservatively add it as well).
+    const billable =
+      (r1.usage.input_tokens ?? 0) +
+      (r1.usage.cache_creation_input_tokens ?? 0);
+    trackUsage(billable || estimateTokens(sample));
     console.log(
       `[ai-auto-code] pass1 codes=${codebook.codes?.length ?? 0} ` +
-        `in_tokens=${r1.usage.input_tokens} stop=${r1.stopReason}`
+        `in_tokens=${r1.usage.input_tokens} ` +
+        `cache_r=${r1.usage.cache_read_input_tokens ?? 0} ` +
+        `cache_w=${r1.usage.cache_creation_input_tokens ?? 0} ` +
+        `stop=${r1.stopReason}`
     );
   } catch (err) {
     pass1Error = err instanceof Error ? err.message : "Claude pass-1 failed";
@@ -475,9 +478,20 @@ async function runAutoCodeJob(input: JobInput) {
           inputSchema: QUOTATIONS_TOOL_SCHEMA,
           maxTokens: 8000,
           temperature: 0.2,
+          // Cache the system + tool schema. The first chunk writes the
+          // cache; every subsequent chunk in the same job hits it,
+          // which:
+          //   * cuts billed input tokens by ~10x for that prefix
+          //   * removes those tokens from the per-minute rate limit
+          // Net effect on a 4-chunk doc: ~3K tokens saved/min budget
+          // freed, which often eliminates the rate-limit wait entirely.
+          cachePrompt: true,
         }
       );
-      trackUsage(r2.usage.input_tokens ?? estimateTokens(chunkText));
+      const billable =
+        (r2.usage.input_tokens ?? 0) +
+        (r2.usage.cache_creation_input_tokens ?? 0);
+      trackUsage(billable || estimateTokens(chunkText));
       const repaired = repairQuotations(chunkText, r2.data.quotations ?? []);
       for (const q of repaired) {
         q.start_offset += startOffset;
@@ -485,7 +499,10 @@ async function runAutoCodeJob(input: JobInput) {
       }
       console.log(
         `[ai-auto-code] pass2 chunk ${i + 1}/${chunks.length}: ` +
-          `quotes=${repaired.length} in_tokens=${r2.usage.input_tokens} ` +
+          `quotes=${repaired.length} ` +
+          `in=${r2.usage.input_tokens} ` +
+          `cache_r=${r2.usage.cache_read_input_tokens ?? 0} ` +
+          `cache_w=${r2.usage.cache_creation_input_tokens ?? 0} ` +
           `stop=${r2.stopReason}`
       );
       allQuotations.push(...repaired);
@@ -568,36 +585,37 @@ async function runAutoCodeJob(input: JobInput) {
 }
 
 interface RawQuote {
-  start_offset?: number;
-  end_offset?: number;
   content?: string;
   rationale?: string;
   code_names?: string[];
   confidence?: number;
 }
 
+/**
+ * Locate each model-returned quotation in the chunk text and assign
+ * character offsets. We no longer ask Claude for the offsets — they're
+ * unreliable and waste tokens. Instead we search by content (with a
+ * head-prefix fallback for quotes the model paraphrased slightly).
+ */
 function repairQuotations(text: string, quotes: RawQuote[]) {
   const out: NonNullable<AutoCodePayload["quotations"]> = [];
   for (const q of quotes) {
     const content = (q.content ?? "").trim();
     if (!content || !Array.isArray(q.code_names) || q.code_names.length === 0) continue;
 
-    let start = typeof q.start_offset === "number" ? q.start_offset : -1;
-    let end = typeof q.end_offset === "number" ? q.end_offset : -1;
-
-    const slice = start >= 0 && end > start ? text.slice(start, end) : "";
-    if (slice.trim() !== content) {
-      const found = text.indexOf(content);
-      if (found === -1) {
-        const head = content.slice(0, Math.min(120, content.length));
-        const altFound = text.indexOf(head);
-        if (altFound === -1) continue;
-        start = altFound;
-        end = Math.min(text.length, altFound + content.length);
-      } else {
-        start = found;
-        end = found + content.length;
-      }
+    let start = text.indexOf(content);
+    let end: number;
+    if (start === -1) {
+      // Fallback: try the first ~120 chars as an anchor, then take the
+      // model's claimed length from there. Catches minor whitespace or
+      // punctuation paraphrases.
+      const head = content.slice(0, Math.min(120, content.length));
+      const altFound = text.indexOf(head);
+      if (altFound === -1) continue;
+      start = altFound;
+      end = Math.min(text.length, altFound + content.length);
+    } else {
+      end = start + content.length;
     }
 
     out.push({

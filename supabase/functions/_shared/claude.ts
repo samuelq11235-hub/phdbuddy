@@ -17,6 +17,16 @@ export interface ClaudeOptions {
   model?: string;
   maxTokens?: number;
   temperature?: number;
+  /**
+   * When true, attach Anthropic prompt-cache breakpoints to the system
+   * prompt and the tool definition. Cache hits cost ~10% of normal
+   * input-token price AND don't count toward the per-minute rate
+   * limit, so reusing them across many sequential calls (e.g. one per
+   * chunk of a long doc) is the single biggest token-efficiency lever.
+   * Cache TTL is ~5 minutes. Safe to enable always — first call writes
+   * the cache, subsequent calls within 5 minutes hit it.
+   */
+  cachePrompt?: boolean;
 }
 
 /** Thrown when a request can't be retried any further. Allows callers
@@ -34,12 +44,17 @@ async function fetchClaudeWithRetry(
   apiKey: string,
   attempt = 0
 ): Promise<Response> {
+  // The prompt-caching beta header is required for cache_control blocks
+  // to take effect. It's a no-op when no cache_control markers are
+  // present, so we send it on every request to keep the call sites
+  // simple.
   const res = await fetch(ANTHROPIC_API_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "x-api-key": apiKey,
       "anthropic-version": "2023-06-01",
+      "anthropic-beta": "prompt-caching-2024-07-31",
     },
     body: JSON.stringify(body),
   });
@@ -147,7 +162,16 @@ export interface ClaudeToolResponse<T> {
   data: T;
   model: string;
   stopReason: string;
-  usage: { input_tokens: number; output_tokens: number };
+  usage: {
+    input_tokens: number;
+    output_tokens: number;
+    /** Tokens written to the prompt cache on this call. Counted at full
+     *  price (1.25x) but only happens once per cache prefix. */
+    cache_creation_input_tokens?: number;
+    /** Tokens served from the cache on this call. Counted at 0.1x price
+     *  AND don't count toward the per-minute input-token rate limit. */
+    cache_read_input_tokens?: number;
+  };
 }
 
 /**
@@ -167,19 +191,38 @@ export async function callClaudeTool<T>(
     throw new Error("Missing ANTHROPIC_API_KEY environment variable");
   }
 
+  // When caching is requested, mark the LAST tool definition with a
+  // cache breakpoint. Anthropic caches everything from start of system
+  // up to that breakpoint inclusive (so the system prompt + the tool
+  // schema). The same breakpoint is reused on subsequent calls within
+  // 5 minutes as long as the cached prefix is byte-identical.
+  const tools = [
+    {
+      name: options.toolName,
+      description: options.toolDescription,
+      input_schema: options.inputSchema,
+      ...(options.cachePrompt ? { cache_control: { type: "ephemeral" } } : {}),
+    },
+  ];
+
+  const systemBlocks =
+    options.cachePrompt && options.system
+      ? [
+          {
+            type: "text",
+            text: options.system,
+            cache_control: { type: "ephemeral" },
+          },
+        ]
+      : options.system;
+
   const body = {
     model: options.model ?? DEFAULT_MODEL,
     max_tokens: options.maxTokens ?? 4096,
     temperature: options.temperature ?? 0.2,
-    system: options.system,
+    system: systemBlocks,
     messages,
-    tools: [
-      {
-        name: options.toolName,
-        description: options.toolDescription,
-        input_schema: options.inputSchema,
-      },
-    ],
+    tools,
     tool_choice: { type: "tool", name: options.toolName },
   };
 
@@ -197,10 +240,18 @@ export async function callClaudeTool<T>(
       c.type === "tool_use" && c.name === options.toolName
   );
 
+  // Anthropic adds cache_creation_input_tokens / cache_read_input_tokens
+  // when caching is in play. Surface them in the log so we can verify
+  // cache hits in production.
+  const u = data.usage ?? {};
+  const cacheStr =
+    u.cache_creation_input_tokens || u.cache_read_input_tokens
+      ? ` cache=${u.cache_read_input_tokens ?? 0}r/${u.cache_creation_input_tokens ?? 0}w`
+      : "";
   console.log(
     `[claude-tool] ${data.model} ${Date.now() - startedAt}ms ` +
       `stop=${data.stop_reason} ` +
-      `in=${data.usage?.input_tokens} out=${data.usage?.output_tokens}`
+      `in=${u.input_tokens} out=${u.output_tokens}${cacheStr}`
   );
 
   if (!toolBlock || typeof toolBlock !== "object" || !("input" in toolBlock)) {

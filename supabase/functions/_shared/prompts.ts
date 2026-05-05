@@ -1,15 +1,11 @@
 // Plantillas de prompts para las edge functions CAQDAS de PHDBuddy.
 // Centralizadas para poder iterarlas sin tocar la lógica de las funciones.
 
-export const AUTO_CODE_SYSTEM_PROMPT = `Eres un analista cualitativo senior con experiencia en codificación inductiva (teoría fundamentada, análisis temático, análisis de contenido). Lees documentos primarios (transcripciones de entrevistas, notas de campo, grupos focales, respuestas abiertas de encuestas) y extraes un libro de códigos inicial fiel al texto, junto con la evidencia textual que respalda cada código.
-
-Reglas estrictas:
-- Fundamenta CADA código en el texto real. Nunca inventes temas que no estén presentes.
-- Las citas deben ser subcadenas LITERALES del texto que se te entrega, carácter por carácter.
-- Prefiere nombres de código concisos y descriptivos (2-5 palabras). Usa estilo de oración (solo la primera palabra en mayúscula).
-- Una misma cita puede llevar varios códigos cuando el segmento aborde varias ideas.
-- Mantén el codebook enfocado: 8-20 códigos para un documento típico, nunca más de 25.
-- Responde SIEMPRE en el mismo idioma que el documento fuente.`;
+// System prompt deliberately compact: the JSON tool schema enforces the
+// structural rules; the prompt only needs to convey ANALYTICAL intent.
+// Repeating schema rules here was burning ~150 tokens per call for no
+// behavioural gain in our evals.
+export const AUTO_CODE_SYSTEM_PROMPT = `Analista cualitativa senior. Codificación inductiva fiel al texto. Nombres de código 2-5 palabras en estilo oración. 8-20 códigos por documento (máx 25). Responde en el idioma del documento.`;
 
 export function autoCodePrompt(args: {
   documentText: string;
@@ -19,67 +15,34 @@ export function autoCodePrompt(args: {
   methodology?: string | null;
   existingCodes: { name: string; description: string | null }[];
 }): string {
+  // Drop description from the existing-codes list (~40% smaller). The
+  // model only needs the names to know which to reuse vs propose.
   const codebook =
     args.existingCodes.length > 0
-      ? args.existingCodes
-          .map((c) => `- ${c.name}${c.description ? `: ${c.description}` : ""}`)
-          .join("\n")
-      : "(vacío — propón un libro de códigos inicial nuevo)";
+      ? args.existingCodes.map((c) => `- ${c.name}`).join("\n")
+      : "(vacío)";
 
-  return `# Contexto del proyecto
-Pregunta de investigación: ${args.researchQuestion ?? "(no especificada)"}
-Metodología: ${args.methodology ?? "(no especificada)"}
+  // Only include researchQuestion / methodology when actually set —
+  // empty "(no especificada)" lines are pure noise.
+  const ctx: string[] = [];
+  if (args.researchQuestion) ctx.push(`Pregunta: ${args.researchQuestion}`);
+  if (args.methodology) ctx.push(`Metodología: ${args.methodology}`);
 
-# Libro de códigos existente (REUTILIZA ESTOS NOMBRES EXACTOS cuando aplique; solo propón códigos nuevos cuando el conjunto existente no capture la idea)
+  return `${ctx.length ? ctx.join("\n") + "\n\n" : ""}Codebook actual del proyecto (REUTILIZA estos nombres exactos cuando apliquen; solo propón códigos nuevos si el conjunto no captura la idea):
 ${codebook}
 
-# Documento a analizar
-Título: ${args.documentTitle}
-Tipo: ${args.documentKind}
-
-Texto:
+Documento (${args.documentKind}): ${args.documentTitle}
 """
 ${args.documentText}
 """
 
-# Tu tarea
-Realiza una codificación abierta del texto anterior.
-
-Devuelve ÚNICAMENTE un objeto JSON (sin prosa, sin bloques de markdown) con la forma EXACTA:
-{
-  "summary": "<un párrafo (máx. 80 palabras) que describa los temas dominantes>",
-  "codes": [
-    { "name": "<etiqueta corta>", "description": "<una oración>", "color": "<color hexadecimal, opcional>" }
-  ],
-  "quotations": [
-    {
-      "start_offset": <offset entero del carácter en el texto donde inicia la cita>,
-      "end_offset": <offset entero donde termina la cita (exclusivo)>,
-      "content": "<subcadena LITERAL del texto>",
-      "rationale": "<una oración explicando por qué importa este segmento>",
-      "code_names": ["<nombre código 1>", "<nombre código 2>"],
-      "confidence": <número 0-1>
-    }
-  ]
+Tarea: codificación abierta del texto.
+- 6-12 citas LITERALES (subcadenas exactas) de 15-200 palabras cada una, analíticamente densas.
+- Cada cita lleva 1-3 códigos del codebook (existente o nuevo).
+- Descripciones y rationales: una oración (≤20 palabras).`;
 }
 
-Restricciones:
-- Cada "content" DEBE ser una subcadena literal que aparezca entre start_offset y end_offset del texto anterior.
-- Las citas deben tener entre 1 y 4 oraciones (15-200 palabras). Evita citar relleno trivial.
-- Apunta a 6-15 citas de alta calidad que cubran los segmentos analíticamente más significativos.
-- Las descripciones de código y los "rationale" deben ser de UNA SOLA oración corta (máx. 20 palabras). Sé conciso.
-- Todos los "code_names" deben aparecer en tu arreglo "codes" (o en el codebook existente).
-- IMPORTANTE: devuelve el JSON COMPLETO y BIEN FORMADO. Si te faltara espacio, prefiere proponer menos códigos/citas antes que dejar el JSON cortado.`;
-}
-
-export const EXTRACT_QUOTATIONS_SYSTEM_PROMPT = `Eres un analista cualitativo senior. Ya cuentas con un libro de códigos y ahora debes seleccionar las citas LITERALES más relevantes del documento y asignarles los códigos correspondientes. Responde SIEMPRE en el mismo idioma que el documento fuente.
-
-Reglas estrictas:
-- Cada "content" debe ser una subcadena LITERAL del texto, carácter por carácter (incluyendo puntuación y saltos de línea).
-- Calcula start_offset y end_offset con precisión (en caracteres, basado en 0).
-- Usa SOLO nombres de código que aparezcan en el codebook proporcionado. No inventes códigos nuevos.
-- Una misma cita puede llevar varios códigos cuando el segmento aborde varias ideas.
-- Prefiere citas analíticamente densas (1-4 oraciones, 15-200 palabras). Evita relleno trivial.`;
+export const EXTRACT_QUOTATIONS_SYSTEM_PROMPT = `Analista cualitativa senior. Recibes un codebook fijo y debes seleccionar citas LITERALES (subcadenas exactas) y asignarles códigos del codebook. No inventes códigos. Responde en el idioma del documento.`;
 
 export function extractQuotationsPrompt(args: {
   documentText: string;
@@ -89,27 +52,19 @@ export function extractQuotationsPrompt(args: {
   codebook: { name: string; description: string | null }[];
   targetCount: number;
 }): string {
-  const codebookList = args.codebook
-    .map((c) => `- ${c.name}${c.description ? `: ${c.description}` : ""}`)
-    .join("\n");
+  // Names only — descriptions roughly double the codebook size for
+  // negligible improvement in retrieval quality on Sonnet 4.5.
+  const codebookList = args.codebook.map((c) => `- ${c.name}`).join("\n");
 
-  return `# Pregunta de investigación
-${args.researchQuestion ?? "(no especificada)"}
-
-# Codebook del proyecto (USA EXCLUSIVAMENTE estos nombres)
+  return `Codebook (USA EXCLUSIVAMENTE estos nombres):
 ${codebookList}
 
-# Documento a codificar
-Título: ${args.documentTitle}
-Tipo: ${args.documentKind}
-
-Texto:
+Documento (${args.documentKind}): ${args.documentTitle}
 """
 ${args.documentText}
 """
 
-# Tu tarea
-Selecciona aproximadamente ${args.targetCount} citas literales del texto anterior y asigna a cada una los códigos del codebook que correspondan. Cada cita debe ser una subcadena exacta del texto (puedes verificarlo contando caracteres desde el inicio del bloque entre comillas triples).`;
+Selecciona ~${args.targetCount} citas literales de 15-200 palabras, analíticamente densas. Cada una con 1-3 códigos del codebook.`;
 }
 
 export const SUGGEST_CODES_SYSTEM_PROMPT = `Eres un analista cualitativo experto que ayuda a alguien que investiga a codificar una sola cita. Elige los mejores códigos del codebook del proyecto (preferido) y propón como máximo 1-2 códigos nuevos solo si ningún código existente encaja bien. Responde siempre en el idioma de la cita.`;

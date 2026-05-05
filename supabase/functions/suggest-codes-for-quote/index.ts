@@ -189,6 +189,9 @@ Deno.serve(async (req) => {
         inputSchema: SUGGEST_TOOL_SCHEMA,
         maxTokens: 2048,
         temperature: 0.2,
+        // System + schema are stable across calls in a session; caching
+        // brings the input bill down to ~10% on repeated invocations.
+        cachePrompt: true,
       }
     );
     aiResp = result.data;

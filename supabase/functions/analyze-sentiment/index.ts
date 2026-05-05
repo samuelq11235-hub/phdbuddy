@@ -200,6 +200,10 @@ Deno.serve(async (req) => {
           inputSchema: SENTIMENT_TOOL_SCHEMA,
           maxTokens: 512,
           temperature: 0.1,
+          // The system prompt + schema are byte-identical for every
+          // quote in a batch run; caching them cuts the per-call input
+          // bill by ~80% after the first quote.
+          cachePrompt: true,
         }
       );
 
