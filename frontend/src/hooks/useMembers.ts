@@ -52,39 +52,41 @@ export function isOwner(role: ProjectRole | null | undefined): boolean {
 // -----------------------------------------------------
 // All members of a project (with profile join)
 // -----------------------------------------------------
-// We embed the `profiles` row but also surface `email` from auth.users
-// where possible. Email is NOT exposed via the public schema, so we fall
-// back to whatever the app already knows from auth context — best-effort.
-
-interface RawMemberRow extends ProjectMember {
-  profile?: { id: string; full_name: string | null; avatar_url: string | null } | null;
-}
+// PostgREST can't auto-detect a relationship between project_members and
+// profiles because they share auth.users as a target FK rather than a
+// direct one — so we issue two queries and merge in JS. Cheap because
+// member lists are short (typically < 20).
 
 export function useProjectMembers(projectId: string | undefined) {
   return useQuery({
     queryKey: ["project-members", projectId],
     queryFn: async (): Promise<ProjectMemberWithProfile[]> => {
       if (!projectId) return [];
-      const { data, error } = await supabase
+
+      const { data: members, error: mErr } = await supabase
         .from("project_members")
-        .select(
-          `id, project_id, user_id, role, created_at, updated_at,
-           profile:profiles(id, full_name, avatar_url)`
-        )
+        .select("id, project_id, user_id, role, created_at, updated_at")
         .eq("project_id", projectId)
         .order("created_at", { ascending: true });
-      if (error) throw error;
-      return (data ?? []).map((row) => {
-        const r = row as RawMemberRow & {
-          profile: RawMemberRow["profile"] | RawMemberRow["profile"][];
-        };
-        const profile = Array.isArray(r.profile) ? r.profile[0] : r.profile;
-        return {
-          ...r,
-          profile: profile ?? null,
-          email: null,
-        } as ProjectMemberWithProfile;
-      });
+      if (mErr) throw mErr;
+      const memberList = (members ?? []) as ProjectMember[];
+      if (memberList.length === 0) return [];
+
+      const userIds = memberList.map((m) => m.user_id);
+      const { data: profiles, error: pErr } = await supabase
+        .from("profiles")
+        .select("id, full_name, avatar_url")
+        .in("id", userIds);
+      if (pErr) throw pErr;
+      const profileById = new Map(
+        (profiles ?? []).map((p: { id: string; full_name: string | null; avatar_url: string | null }) => [p.id, p])
+      );
+
+      return memberList.map((m) => ({
+        ...m,
+        profile: profileById.get(m.user_id) ?? null,
+        email: null,
+      }));
     },
     enabled: !!projectId,
   });

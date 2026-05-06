@@ -335,21 +335,44 @@ function parseQde(xml: string): ParsedQdaProject {
   const projectTag = /<Project\s[^>]*>/i.exec(xml)?.[0] ?? "";
   const name = attr(projectTag, "name") || "Imported project";
 
-  // Codes (recursive but we flatten and record parent)
+  // Codes (recursive). We can't use a simple regex with `.*?` because that
+  // would match the first `</Code>` it finds, which is the inner one for
+  // nested codes — the parent->child hierarchy would be lost. Instead we
+  // do a depth-aware sweep over <Code ...> open and </Code> close tokens.
   const codes: ParsedQdaProject["codes"] = [];
-  function extractCodes(xml: string, parentGuid: string | null) {
-    const re = /<Code\s([^>]*)(?:\/>|>([\s\S]*?)<\/Code>)/g;
+  function extractCodes(block: string, parentGuid: string | null) {
+    const tagRe = /<Code(\s[^>]*?)?(\/?)>|<\/Code>/g;
+    type Frame = { start: number; attrs: string; guid: string; parent: string | null };
+    const stack: Frame[] = [];
     let m: RegExpExecArray | null;
-    while ((m = re.exec(xml)) !== null) {
-      const attrsStr = m[1];
-      const inner = m[2] ?? "";
-      const guid = attr(attrsStr, "guid");
-      const codeName = attr(attrsStr, "name");
-      const color = attr(attrsStr, "color").replace("#", "");
-      const description = innerText("Description", inner);
-      if (guid && codeName) {
-        codes.push({ guid, name: codeName, description, color: color || "7C3AED", parentGuid });
-        if (inner) extractCodes(inner, guid);
+    while ((m = tagRe.exec(block)) !== null) {
+      const token = m[0];
+      if (token === "</Code>") {
+        const frame = stack.pop();
+        if (!frame) continue;
+        const innerStart = frame.start;
+        const inner = block.slice(innerStart, m.index);
+        const codeName = attr(frame.attrs, "name");
+        const color = attr(frame.attrs, "color").replace("#", "");
+        const description = innerText("Description", inner);
+        if (frame.guid && codeName) {
+          codes.push({ guid: frame.guid, name: codeName, description, color: color || "7C3AED", parentGuid: frame.parent });
+        }
+      } else {
+        const attrs = m[1] ?? "";
+        const selfClosing = m[2] === "/";
+        const guid = attr(attrs, "guid");
+        if (selfClosing) {
+          const codeName = attr(attrs, "name");
+          const color = attr(attrs, "color").replace("#", "");
+          const parent = stack.length > 0 ? stack[stack.length - 1].guid : parentGuid;
+          if (guid && codeName) {
+            codes.push({ guid, name: codeName, description: "", color: color || "7C3AED", parentGuid: parent });
+          }
+        } else {
+          const parent = stack.length > 0 ? stack[stack.length - 1].guid : parentGuid;
+          stack.push({ start: tagRe.lastIndex, attrs, guid, parent });
+        }
       }
     }
   }

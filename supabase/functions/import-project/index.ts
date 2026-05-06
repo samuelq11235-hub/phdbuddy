@@ -65,26 +65,58 @@ Deno.serve(async (req) => {
   // The add_project_owner trigger fires here and inserts the owner row
   // in project_members automatically.
 
-  // --- Import codes (topological sort: parents before children) ---
+  // --- Import codes (topological insertion: parent must exist first) ---
   // Map from QDE guid → PHDBuddy uuid.
   const codeGuidMap = new Map<string, string>();
   const colorFallback = "#7C3AED";
 
-  // Sort so parents come first.
-  const sorted = [...parsed.codes];
-  sorted.sort((a, b) => {
-    if (!a.parentGuid && !b.parentGuid) return 0;
-    if (!a.parentGuid) return -1;
-    if (!b.parentGuid) return 1;
-    // Parent before child.
-    if (b.guid === a.parentGuid) return 1;
-    if (a.guid === b.parentGuid) return -1;
-    return 0;
-  });
-
-  for (const code of sorted) {
-    const parentId = code.parentGuid ? (codeGuidMap.get(code.parentGuid) ?? null) : null;
-    const { data: inserted, error } = await supabase
+  // Iteratively insert codes whose parent is already known (or which have
+  // no parent). Repeat until nothing changes — handles arbitrary depth and
+  // is robust against cycles or dangling parentGuid refs (those get
+  // re-parented to null on the final pass).
+  const remaining = [...parsed.codes];
+  const validGuids = new Set(parsed.codes.map((c) => c.guid));
+  let safety = remaining.length + 5;
+  while (remaining.length > 0 && safety-- > 0) {
+    const next: typeof remaining = [];
+    let progressed = false;
+    for (const code of remaining) {
+      const parentResolvable =
+        !code.parentGuid ||
+        codeGuidMap.has(code.parentGuid) ||
+        !validGuids.has(code.parentGuid); // dangling → treat as root
+      if (!parentResolvable) {
+        next.push(code);
+        continue;
+      }
+      const parentId = code.parentGuid ? (codeGuidMap.get(code.parentGuid) ?? null) : null;
+      const { data: inserted, error } = await supabase
+        .from("codes")
+        .insert({
+          user_id: userId,
+          project_id: projectId,
+          name: code.name || "Unnamed code",
+          description: code.description || null,
+          color: code.color ? `#${code.color.replace("#", "").padEnd(6, "0").slice(0, 6)}` : colorFallback,
+          parent_id: parentId,
+        })
+        .select("id")
+        .single();
+      if (error || !inserted) {
+        console.warn(`[import] failed to insert code ${code.name}: ${error?.message}`);
+        progressed = true; // drop it from the queue regardless
+        continue;
+      }
+      codeGuidMap.set(code.guid, inserted.id);
+      progressed = true;
+    }
+    remaining.length = 0;
+    remaining.push(...next);
+    if (!progressed) break; // cycle — bail rather than loop forever
+  }
+  // Anything still remaining is part of a cycle; insert as roots.
+  for (const code of remaining) {
+    const { data: inserted } = await supabase
       .from("codes")
       .insert({
         user_id: userId,
@@ -92,15 +124,11 @@ Deno.serve(async (req) => {
         name: code.name || "Unnamed code",
         description: code.description || null,
         color: code.color ? `#${code.color.replace("#", "").padEnd(6, "0").slice(0, 6)}` : colorFallback,
-        parent_id: parentId,
+        parent_id: null,
       })
       .select("id")
       .single();
-    if (error || !inserted) {
-      console.warn(`[import] failed to insert code ${code.name}: ${error?.message}`);
-      continue;
-    }
-    codeGuidMap.set(code.guid, inserted.id);
+    if (inserted) codeGuidMap.set(code.guid, inserted.id);
   }
 
   // --- Import documents + quotations ---

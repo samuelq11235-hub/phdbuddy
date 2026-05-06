@@ -78,15 +78,13 @@ Deno.serve(async (req) => {
   }
 
   try {
-    // --- Gather project data ---
+    // --- Gather project-scoped tables (have project_id column) ---
     const [
       { data: project },
       { data: documents },
       { data: codes },
       { data: codeGroups },
-      { data: codeGroupMembers },
       { data: quotationsRaw },
-      { data: quotationCodes },
       { data: memos },
       { data: sentiments },
     ] = await Promise.all([
@@ -94,9 +92,7 @@ Deno.serve(async (req) => {
       supabase.from("documents").select("id,title,kind,full_text").eq("project_id", projectId),
       supabase.from("codes").select("id,name,description,color,parent_id,usage_count").eq("project_id", projectId),
       supabase.from("code_groups").select("id,name,description").eq("project_id", projectId),
-      supabase.from("code_group_members").select("code_id,code_group_id"),
       supabase.from("quotations").select("id,document_id,start_offset,end_offset,content,comment,created_at").eq("project_id", projectId),
-      supabase.from("quotation_codes").select("quotation_id,code_id,created_by_ai"),
       supabase.from("memos").select("id,title,kind,content").eq("project_id", projectId),
       supabase.from("quotation_sentiment").select("quotation_id,label").eq("project_id", projectId),
     ]);
@@ -105,8 +101,30 @@ Deno.serve(async (req) => {
     const docs = documents ?? [];
     const codeList = codes ?? [];
     const quotas = quotationsRaw ?? [];
-    const qcList = quotationCodes ?? [];
     const memoList = memos ?? [];
+
+    // --- Junction tables (no project_id column) — must scope by parent IDs.
+    // Service-role bypasses RLS so we MUST filter explicitly to avoid
+    // leaking other projects' rows into the export.
+    const quotationIds = quotas.map((q: { id: string }) => q.id);
+    const codeGroupIds = (codeGroups ?? []).map((g: { id: string }) => g.id);
+
+    const [{ data: quotationCodes }, { data: codeGroupMembers }] = await Promise.all([
+      quotationIds.length > 0
+        ? supabase
+            .from("quotation_codes")
+            .select("quotation_id,code_id,created_by_ai")
+            .in("quotation_id", quotationIds)
+        : Promise.resolve({ data: [] as Array<{ quotation_id: string; code_id: string; created_by_ai: boolean }> }),
+      codeGroupIds.length > 0
+        ? supabase
+            .from("code_group_members")
+            .select("code_id,code_group_id")
+            .in("code_group_id", codeGroupIds)
+        : Promise.resolve({ data: [] as Array<{ code_id: string; code_group_id: string }> }),
+    ]);
+
+    const qcList = quotationCodes ?? [];
     const sentimentMap = new Map((sentiments ?? []).map((s: { quotation_id: string; label: string }) => [s.quotation_id, s.label]));
     const codeNameMap = new Map(codeList.map((c: { id: string; name: string }) => [c.id, c.name]));
 
@@ -206,7 +224,6 @@ Deno.serve(async (req) => {
       .upload(storagePath, fileBytes, {
         contentType,
         upsert: false,
-        duplex: "half",
       });
 
     if (uploadErr) throw new Error(`Storage upload failed: ${uploadErr.message}`);
