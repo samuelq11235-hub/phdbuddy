@@ -1,10 +1,13 @@
-import { X, Sparkles } from "lucide-react";
+import { X, Sparkles, Wand2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import type { Code } from "@/types/database";
 
 interface Props {
-  code: Pick<Code, "id" | "name" | "color"> & { created_by_ai?: boolean };
+  code: Pick<Code, "id" | "name" | "color"> & {
+    created_by_ai?: boolean;
+    smart_query_id?: string | null;
+  };
   size?: "sm" | "md";
   showAi?: boolean;
   onClick?: () => void;
@@ -35,6 +38,9 @@ export function CodeBadge({ code, size = "sm", showAi, onClick, onRemove, classN
         style={{ backgroundColor: code.color }}
       />
       <span className="truncate max-w-[180px]">{code.name}</span>
+      {code.smart_query_id && (
+        <Wand2 className="h-3 w-3 opacity-70" aria-label="Smart code (membresía dinámica)" />
+      )}
       {showAi && code.created_by_ai && (
         <Sparkles className="h-3 w-3 opacity-70" aria-label="Generado por IA" />
       )}

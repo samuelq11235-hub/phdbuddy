@@ -14,6 +14,7 @@ import {
   Search,
   BarChart3,
   Folders,
+  Activity,
 } from "lucide-react";
 
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -35,6 +36,7 @@ import { AgreementPanel } from "@/components/agreement/AgreementPanel";
 import { QueryBuilderPanel } from "@/components/query/QueryBuilderPanel";
 import { TextAnalysisPanel } from "@/components/analysis/TextAnalysisPanel";
 import { DocumentGroupsPanel } from "@/components/documents/DocumentGroupsPanel";
+import { ActivityLogPanel } from "@/components/activity/ActivityLogPanel";
 
 const VALID_TABS = [
   "documents",
@@ -48,6 +50,7 @@ const VALID_TABS = [
   "analysis",
   "chat",
   "agreement",
+  "activity",
   "members",
 ] as const;
 type TabId = (typeof VALID_TABS)[number];
@@ -152,6 +155,7 @@ export default function ProjectWorkspacePage() {
           <TabTrigger value="analysis" icon={BarChart3}>Análisis</TabTrigger>
           <TabTrigger value="chat" icon={Sparkles}>Chat IA</TabTrigger>
           <TabTrigger value="agreement" icon={ShieldCheck}>Acuerdo</TabTrigger>
+          <TabTrigger value="activity" icon={Activity}>Actividad</TabTrigger>
           <TabTrigger value="members" icon={Users}>Miembros</TabTrigger>
         </TabsList>
 
@@ -188,6 +192,9 @@ export default function ProjectWorkspacePage() {
           </TabsContent>
           <TabsContent value="agreement">
             <AgreementPanel projectId={projectId} />
+          </TabsContent>
+          <TabsContent value="activity">
+            <ActivityLogPanel projectId={projectId} />
           </TabsContent>
           <TabsContent value="members">
             <MembersPanelGate projectId={projectId} />

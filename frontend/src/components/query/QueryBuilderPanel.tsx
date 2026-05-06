@@ -15,6 +15,7 @@ import { useCodes } from "@/hooks/useCodes";
 import { useDocuments } from "@/hooks/useDocuments";
 import {
   useApplyResultsAsCode,
+  useCreateSmartCode,
   useDeleteSavedQuery,
   useExecuteQuery,
   useSaveQuery,
@@ -46,6 +47,7 @@ export function QueryBuilderPanel({ projectId }: Props) {
   const save = useSaveQuery();
   const del = useDeleteSavedQuery();
   const applyAsCode = useApplyResultsAsCode();
+  const smart = useCreateSmartCode();
   const { toast } = useToast();
 
   const [tree, setTree] = useState<QueryNode>(EMPTY_AND);
@@ -135,6 +137,27 @@ export function QueryBuilderPanel({ projectId }: Props) {
     }
   }
 
+  async function makeSmartCode() {
+    const name = window.prompt(
+      "Nombre del smart code (su lista de citas se recalcula en vivo desde la consulta actual)",
+      savedName || "Smart code"
+    );
+    if (!name) return;
+    try {
+      await smart.mutateAsync({ projectId, name, definition: tree });
+      toast({
+        title: "Smart code creado",
+        description: "Aparece en el codebook; su membresía se recalcula ejecutando la consulta enlazada.",
+      });
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "No se pudo crear el smart code",
+        description: err instanceof Error ? err.message : undefined,
+      });
+    }
+  }
+
   return (
     <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
       <div className="space-y-4">
@@ -195,6 +218,20 @@ export function QueryBuilderPanel({ projectId }: Props) {
               >
                 <Wand2 className="mr-1.5 h-3.5 w-3.5" />
                 Convertir resultado en código
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={makeSmartCode}
+                disabled={smart.isPending}
+                title="Smart code: el código se enlaza a esta consulta y su lista de citas se recalcula automáticamente"
+              >
+                {smart.isPending ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Wand2 className="mr-1.5 h-3.5 w-3.5" />
+                )}
+                Crear smart code
               </Button>
             </div>
           </div>

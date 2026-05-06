@@ -179,6 +179,9 @@ export interface Code {
   color: string;
   created_by_ai: boolean;
   usage_count: number;
+  // F18: when set, this is a "smart code" — its quotations come from
+  // running saved_queries[smart_query_id], not from quotation_codes rows.
+  smart_query_id: string | null;
   created_at: string;
   updated_at: string;
 }

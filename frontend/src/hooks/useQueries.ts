@@ -87,6 +87,56 @@ export function useExecuteQuery() {
   });
 }
 
+// Smart code: creates a code linked to a saved_query via
+// codes.smart_query_id (F18). Quotation membership is *not* materialised
+// — the UI resolves it live by running the query.
+export function useCreateSmartCode() {
+  const qc = useQueryClient();
+  const { user } = useAuth();
+  return useMutation({
+    mutationFn: async (input: {
+      projectId: string;
+      name: string;
+      definition: QueryNode;
+      description?: string;
+      color?: string;
+    }) => {
+      if (!user) throw new Error("No has iniciado sesión");
+      const { data: q, error: qErr } = await supabase
+        .from("saved_queries")
+        .insert({
+          user_id: user.id,
+          project_id: input.projectId,
+          name: input.name,
+          description: input.description ?? "Smart code",
+          definition: input.definition,
+        })
+        .select("id")
+        .single();
+      if (qErr) throw qErr;
+      const queryId = (q as { id: string }).id;
+      const { data: c, error: cErr } = await supabase
+        .from("codes")
+        .insert({
+          user_id: user.id,
+          project_id: input.projectId,
+          name: input.name,
+          description: input.description ?? "Smart code (membresía dinámica)",
+          color: input.color ?? "#06B6D4",
+          smart_query_id: queryId,
+        })
+        .select()
+        .single();
+      if (cErr) throw cErr;
+      return c;
+    },
+    onSuccess: (_c, vars) => {
+      qc.invalidateQueries({ queryKey: ["codes", vars.projectId] });
+      qc.invalidateQueries({ queryKey: ["saved-queries", vars.projectId] });
+    },
+  });
+}
+
 // "Convertir resultado en código": creates a new code with `name` and
 // applies it (via quotation_codes) to every quotation_id passed.
 export function useApplyResultsAsCode() {
