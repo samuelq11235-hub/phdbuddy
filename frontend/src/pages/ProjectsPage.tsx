@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ProjectCard } from "@/components/projects/ProjectCard";
 import { NewProjectDialog } from "@/components/projects/NewProjectDialog";
+import { ImportProjectButton } from "@/components/projects/ImportProjectButton";
 import { useProjects } from "@/hooks/useProjects";
 
 export default function ProjectsPage() {
@@ -18,14 +19,17 @@ export default function ProjectsPage() {
             Cada proyecto guarda sus propios documentos, codebook, citas y memos.
           </p>
         </div>
-        <NewProjectDialog
-          trigger={
-            <Button size="lg">
-              <Plus className="mr-2 h-4 w-4" />
-              Nuevo proyecto
-            </Button>
-          }
-        />
+        <div className="flex items-center gap-2">
+          <ImportProjectButton />
+          <NewProjectDialog
+            trigger={
+              <Button size="lg">
+                <Plus className="mr-2 h-4 w-4" />
+                Nuevo proyecto
+              </Button>
+            }
+          />
+        </div>
       </div>
 
       {isLoading ? (

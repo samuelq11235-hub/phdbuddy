@@ -155,7 +155,51 @@ export const api = {
       role: "admin" | "coder" | "viewer";
     }>("accept-invitation", args);
   },
+
+  exportProject(args: { projectId: string; format: "csv" | "markdown" | "qdaxml" }) {
+    return invoke<{
+      ok: true;
+      jobId: string;
+      format: string;
+      signedUrl: string;
+      expiresAt: string;
+      storagePath: string;
+      sizeBytes: number;
+    }>("export-project", args);
+  },
 };
+
+// Import uses multipart/form-data — can't use the generic invoke() helper.
+export async function importProject(file: File): Promise<{
+  ok: true;
+  projectId: string;
+  projectName: string;
+  imported: {
+    codes: number;
+    documents: number;
+    quotations: number;
+    codings: number;
+    memos: number;
+  };
+}> {
+  const session = await supabase.auth.getSession();
+  const token = session.data.session?.access_token;
+  if (!token) throw new Error("No autenticado");
+
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+  const form = new FormData();
+  form.append("file", file);
+
+  const resp = await fetch(`${supabaseUrl}/functions/v1/import-project`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+
+  const data = await resp.json();
+  if (!resp.ok) throw new Error((data as { error?: string }).error ?? "Import failed");
+  return data;
+}
 
 export async function uploadDocumentFile(
   userId: string,

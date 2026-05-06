@@ -106,5 +106,11 @@ verify_jwt = true
 [functions.accept-invitation]
 verify_jwt = true
 
+[functions.export-project]
+verify_jwt = true
+
+[functions.import-project]
+verify_jwt = true
+
 [analytics]
 enabled = false

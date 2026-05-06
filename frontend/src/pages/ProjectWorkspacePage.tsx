@@ -26,6 +26,7 @@ import { MemosPanel } from "@/components/memos/MemosPanel";
 import { CodeNetworkPanel } from "@/components/network/CodeNetworkPanel";
 import { ChatPanel } from "@/components/ai/ChatPanel";
 import { MembersPanelGate } from "@/components/projects/MembersPanel";
+import { ExportButton } from "@/components/projects/ExportButton";
 
 const VALID_TABS = [
   "documents",
@@ -122,6 +123,7 @@ export default function ProjectWorkspacePage() {
           <Stat label="códigos" value={project.code_count} icon={Tags} />
           <Stat label="citas" value={project.quotation_count} icon={Quote} />
           <Stat label="memos" value={project.memo_count} icon={NotebookPen} />
+          <ExportButton projectId={projectId} />
         </div>
       </header>
 

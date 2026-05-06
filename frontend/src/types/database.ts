@@ -485,6 +485,26 @@ export interface DocumentForCodeRow {
 }
 
 // =====================================================
+// F6 — Exports / Imports
+// =====================================================
+export type ExportFormat = "csv" | "markdown" | "qdaxml";
+export type ExportJobStatus = "pending" | "done" | "error";
+
+export interface ExportJob {
+  id: string;
+  project_id: string;
+  user_id: string;
+  format: ExportFormat;
+  status: ExportJobStatus;
+  storage_path: string | null;
+  signed_url: string | null;
+  signed_url_expires_at: string | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// =====================================================
 // F5 — Multi-user collaboration
 // =====================================================
 export type ProjectRole = "owner" | "admin" | "coder" | "viewer";
