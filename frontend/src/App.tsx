@@ -7,6 +7,7 @@ import LandingPage from "@/pages/LandingPage";
 import LoginPage from "@/pages/LoginPage";
 import SignupPage from "@/pages/SignupPage";
 import AuthCallbackPage from "@/pages/AuthCallbackPage";
+import InvitePage from "@/pages/InvitePage";
 import ProjectsPage from "@/pages/ProjectsPage";
 import ProjectWorkspacePage from "@/pages/ProjectWorkspacePage";
 import DocumentViewerPage from "@/pages/DocumentViewerPage";
@@ -20,6 +21,9 @@ export default function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<SignupPage />} />
       <Route path="/auth/callback" element={<AuthCallbackPage />} />
+      {/* Public route — InvitePage itself handles the unauthenticated state
+          and renders sign-in / sign-up CTAs that preserve the invite token. */}
+      <Route path="/invite/:token" element={<InvitePage />} />
 
       <Route
         path="/app"

@@ -27,6 +27,7 @@ import {
   useDeleteCodeGroup,
   useRemoveCodeFromGroup,
 } from "@/hooks/useCodeGroups";
+import { canWrite, useMyRole } from "@/hooks/useMembers";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import type { Code, CodeGroup } from "@/types/database";
@@ -40,6 +41,8 @@ export function CodebookPanel({ projectId }: { projectId: string }) {
   const { tree, isLoading, data: codes } = useCodeTree(projectId);
   const { data: groups, isLoading: groupsLoading } = useCodeGroups(projectId);
   const { data: members } = useCodeGroupMembers(projectId);
+  const { data: myRole } = useMyRole(projectId);
+  const writable = canWrite(myRole);
 
   const [search, setSearch] = useState("");
   const [view, setView] = useState<ViewMode>("tree");
@@ -88,26 +91,28 @@ export function CodebookPanel({ projectId }: { projectId: string }) {
             . Construye el vocabulario conceptual de tu estudio.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <NewCodeGroupDialog
-            projectId={projectId}
-            trigger={
-              <Button variant="outline">
-                <Layers className="mr-2 h-4 w-4" />
-                Nuevo grupo
-              </Button>
-            }
-          />
-          <NewCodeDialog
-            projectId={projectId}
-            trigger={
-              <Button>
-                <Plus className="mr-2 h-4 w-4" />
-                Nuevo código
-              </Button>
-            }
-          />
-        </div>
+        {writable && (
+          <div className="flex flex-wrap items-center gap-2">
+            <NewCodeGroupDialog
+              projectId={projectId}
+              trigger={
+                <Button variant="outline">
+                  <Layers className="mr-2 h-4 w-4" />
+                  Nuevo grupo
+                </Button>
+              }
+            />
+            <NewCodeDialog
+              projectId={projectId}
+              trigger={
+                <Button>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Nuevo código
+                </Button>
+              }
+            />
+          </div>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-2">

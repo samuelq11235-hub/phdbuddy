@@ -9,12 +9,15 @@ import {
   Sparkles,
   ArrowLeft,
   LayoutGrid,
+  Users,
 } from "lucide-react";
 
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { useProject } from "@/hooks/useProjects";
+import { useMyRole } from "@/hooks/useMembers";
+import type { ProjectRole } from "@/types/database";
 import { DocumentsPanel } from "@/components/documents/DocumentsPanel";
 import { CodebookPanel } from "@/components/codes/CodebookPanel";
 import { CodeDocumentMatrix } from "@/components/codes/CodeDocumentMatrix";
@@ -22,13 +25,31 @@ import { QuotationsPanel } from "@/components/quotations/QuotationsPanel";
 import { MemosPanel } from "@/components/memos/MemosPanel";
 import { CodeNetworkPanel } from "@/components/network/CodeNetworkPanel";
 import { ChatPanel } from "@/components/ai/ChatPanel";
+import { MembersPanelGate } from "@/components/projects/MembersPanel";
 
-const VALID_TABS = ["documents", "codes", "quotations", "matrix", "memos", "network", "chat"] as const;
+const VALID_TABS = [
+  "documents",
+  "codes",
+  "quotations",
+  "matrix",
+  "memos",
+  "network",
+  "chat",
+  "members",
+] as const;
 type TabId = (typeof VALID_TABS)[number];
+
+const ROLE_LABELS: Record<ProjectRole, string> = {
+  owner: "Propietario",
+  admin: "Admin",
+  coder: "Codificador",
+  viewer: "Solo lectura",
+};
 
 export default function ProjectWorkspacePage() {
   const { projectId } = useParams<{ projectId: string }>();
   const { data: project, isLoading } = useProject(projectId);
+  const { data: myRole } = useMyRole(projectId);
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get("tab") ?? "documents";
   const tab = (VALID_TABS as readonly string[]).includes(tabParam) ? (tabParam as TabId) : "documents";
@@ -83,11 +104,18 @@ export default function ProjectWorkspacePage() {
               <span className="font-medium">Pregunta:</span> {project.research_question}
             </p>
           )}
-          {project.methodology && (
-            <span className="mt-2 inline-flex rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-              {project.methodology}
-            </span>
-          )}
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            {project.methodology && (
+              <span className="inline-flex rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                {project.methodology}
+              </span>
+            )}
+            {myRole && myRole !== "owner" && (
+              <span className="inline-flex rounded-full border border-border bg-card px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                {ROLE_LABELS[myRole]}
+              </span>
+            )}
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
           <Stat label="docs" value={project.document_count} icon={FileText} />
@@ -106,6 +134,7 @@ export default function ProjectWorkspacePage() {
           <TabTrigger value="memos" icon={NotebookPen}>Memos</TabTrigger>
           <TabTrigger value="network" icon={NetworkIcon}>Red</TabTrigger>
           <TabTrigger value="chat" icon={Sparkles}>Chat IA</TabTrigger>
+          <TabTrigger value="members" icon={Users}>Miembros</TabTrigger>
         </TabsList>
 
         <div className="mt-6">
@@ -129,6 +158,9 @@ export default function ProjectWorkspacePage() {
           </TabsContent>
           <TabsContent value="chat">
             <ChatPanel projectId={projectId} />
+          </TabsContent>
+          <TabsContent value="members">
+            <MembersPanelGate projectId={projectId} />
           </TabsContent>
         </div>
       </Tabs>

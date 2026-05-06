@@ -483,3 +483,48 @@ export interface DocumentForCodeRow {
   quotation_count: number;
   last_quoted_at: string | null;
 }
+
+// =====================================================
+// F5 — Multi-user collaboration
+// =====================================================
+export type ProjectRole = "owner" | "admin" | "coder" | "viewer";
+
+// Roles assignable via invitation (everything except owner — which can
+// only be minted via project creation or a future transfer flow).
+export type InvitableRole = Exclude<ProjectRole, "owner">;
+
+export interface ProjectMember {
+  id: string;
+  project_id: string;
+  user_id: string;
+  role: ProjectRole;
+  created_at: string;
+  updated_at: string;
+}
+
+// Convenience shape returned by the members panel — joins profile fields
+// from `profiles` so the UI can show a name + avatar without a second
+// round-trip.
+export interface ProjectMemberWithProfile extends ProjectMember {
+  profile: Pick<Profile, "id" | "full_name" | "avatar_url"> | null;
+  email: string | null;
+}
+
+export interface ProjectInvitation {
+  id: string;
+  project_id: string;
+  email: string;
+  role: InvitableRole;
+  token: string;
+  invited_by: string;
+  expires_at: string;
+  accepted_at: string | null;
+  revoked_at: string | null;
+  created_at: string;
+}
+
+// Row shape of the my_projects_with_role() RPC — extends Project with
+// the caller's role, so the projects list can render role-aware actions.
+export interface ProjectWithRole extends Project {
+  role: ProjectRole;
+}

@@ -23,6 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useMemos, useCreateMemo, useDeleteMemo, useUpdateMemo } from "@/hooks/useMemos";
+import { canWrite, useMyRole } from "@/hooks/useMembers";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import type { Memo, MemoType } from "@/types/database";
@@ -43,6 +44,8 @@ const KIND_COLOR: Record<MemoType, string> = {
 
 export function MemosPanel({ projectId }: { projectId: string }) {
   const { data: memos, isLoading } = useMemos(projectId);
+  const { data: myRole } = useMyRole(projectId);
+  const writable = canWrite(myRole);
   const [activeMemoId, setActiveMemoId] = useState<string | null>(null);
   const activeMemo = memos?.find((m) => m.id === activeMemoId) ?? null;
 
@@ -51,7 +54,9 @@ export function MemosPanel({ projectId }: { projectId: string }) {
       <div>
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-xl font-semibold">Memos</h2>
-          <NewMemoDialog projectId={projectId} onCreated={(m) => setActiveMemoId(m.id)} />
+          {writable && (
+            <NewMemoDialog projectId={projectId} onCreated={(m) => setActiveMemoId(m.id)} />
+          )}
         </div>
         {isLoading ? (
           <div className="space-y-2">

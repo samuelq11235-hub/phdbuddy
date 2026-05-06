@@ -27,6 +27,7 @@ PHDBuddy convierte montones de entrevistas, transcripciones, grupos focales y no
 - **Chat del proyecto (RAG)** — pregunta "¿qué dicen las personas participantes sobre la ansiedad?" y obtén respuestas con citas tipo `[Q3]`, `[C2]` que enlazan a citas y fragmentos específicos.
 - **Red de co-ocurrencia de códigos** — visualiza qué códigos aparecen juntos en tus citas.
 - **Memos** — notas analíticas, metodológicas, teóricas y reflexivas vinculadas a códigos / citas / documentos.
+- **Colaboración multi-usuario** — invita compañeras a un proyecto con roles (`owner`, `admin`, `coder`, `viewer`); RLS por rol asegura que cada quien solo puede hacer lo que su rol permite.
 
 ## Stack tecnológico
 
@@ -121,6 +122,11 @@ supabase functions deploy suggest-codes-for-quote
 supabase functions deploy cluster-themes
 supabase functions deploy project-chat
 supabase functions deploy embed-quotation
+supabase functions deploy analyze-sentiment
+supabase functions deploy code-network
+supabase functions deploy suggest-relations
+supabase functions deploy send-invitation
+supabase functions deploy accept-invitation
 ```
 
 ### 5. Configura Google OAuth (opcional)

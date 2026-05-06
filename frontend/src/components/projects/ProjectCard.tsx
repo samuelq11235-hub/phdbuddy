@@ -17,11 +17,23 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useDeleteProject } from "@/hooks/useProjects";
 import { useToast } from "@/hooks/use-toast";
-import type { Project } from "@/types/database";
+import type { Project, ProjectRole, ProjectWithRole } from "@/types/database";
 
-export function ProjectCard({ project }: { project: Project }) {
+const ROLE_LABELS: Record<ProjectRole, string> = {
+  owner: "Propietario",
+  admin: "Admin",
+  coder: "Codificador",
+  viewer: "Solo lectura",
+};
+
+export function ProjectCard({ project }: { project: Project | ProjectWithRole }) {
   const deleteProject = useDeleteProject();
   const { toast } = useToast();
+  // `role` is present on rows from `useProjects()` (RPC) but absent on the
+  // legacy `Project` shape that other call sites still pass — fall back to
+  // owner so older code paths don't accidentally hide the delete CTA.
+  const role: ProjectRole = ("role" in project && project.role) || "owner";
+  const canDelete = role === "owner";
 
   async function handleDelete(e: React.MouseEvent) {
     e.preventDefault();
@@ -58,6 +70,11 @@ export function ProjectCard({ project }: { project: Project }) {
                 </p>
               )}
             </div>
+            {role !== "owner" && (
+              <span className="flex-shrink-0 rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                {ROLE_LABELS[role]}
+              </span>
+            )}
           </div>
         </CardHeader>
         <CardContent className="pb-4">
@@ -83,26 +100,28 @@ export function ProjectCard({ project }: { project: Project }) {
         </CardFooter>
       </Link>
 
-      <div className="absolute right-2 top-2 opacity-0 transition-opacity group-hover:opacity-100">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-8 w-8"
-              onClick={(e) => e.preventDefault()}
-            >
-              <MoreVertical className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={handleDelete} className="text-destructive">
-              <Trash2 className="mr-2 h-4 w-4" />
-              Eliminar proyecto
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
+      {canDelete && (
+        <div className="absolute right-2 top-2 opacity-0 transition-opacity group-hover:opacity-100">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8"
+                onClick={(e) => e.preventDefault()}
+              >
+                <MoreVertical className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={handleDelete} className="text-destructive">
+                <Trash2 className="mr-2 h-4 w-4" />
+                Eliminar proyecto
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      )}
     </Card>
   );
 }

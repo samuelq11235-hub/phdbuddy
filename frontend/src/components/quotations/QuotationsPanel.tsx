@@ -18,6 +18,7 @@ import { useCodes } from "@/hooks/useCodes";
 import { useDocuments } from "@/hooks/useDocuments";
 import { useClusterThemes, useThemeSuggestions } from "@/hooks/useAISuggestions";
 import { useAnalyzeSentiment, useQuotationSentimentMap } from "@/hooks/useSentiment";
+import { canWrite, useMyRole } from "@/hooks/useMembers";
 import { useToast } from "@/hooks/use-toast";
 import type { SentimentLabel } from "@/types/database";
 
@@ -37,6 +38,8 @@ export function QuotationsPanel({ projectId }: { projectId: string }) {
   const cluster = useClusterThemes();
   const sentiments = useQuotationSentimentMap(projectId);
   const analyzeSentiment = useAnalyzeSentiment();
+  const { data: myRole } = useMyRole(projectId);
+  const writable = canWrite(myRole);
   const { toast } = useToast();
 
   const filtered = useMemo(() => {
@@ -129,31 +132,33 @@ export function QuotationsPanel({ projectId }: { projectId: string }) {
             Filtra por código o documento, o ejecuta el descubrimiento de temas.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            onClick={handleAnalyzeSentiment}
-            disabled={analyzeSentiment.isPending || (quotations?.length ?? 0) === 0}
-          >
-            {analyzeSentiment.isPending ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <Heart className="mr-2 h-4 w-4" />
-            )}
-            Analizar sentimiento
-          </Button>
-          <Button
-            onClick={handleClusterThemes}
-            disabled={cluster.isPending || (quotations?.length ?? 0) < 2}
-          >
-            {cluster.isPending ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <Sparkles className="mr-2 h-4 w-4" />
-            )}
-            Descubrir temas
-          </Button>
-        </div>
+        {writable && (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={handleAnalyzeSentiment}
+              disabled={analyzeSentiment.isPending || (quotations?.length ?? 0) === 0}
+            >
+              {analyzeSentiment.isPending ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Heart className="mr-2 h-4 w-4" />
+              )}
+              Analizar sentimiento
+            </Button>
+            <Button
+              onClick={handleClusterThemes}
+              disabled={cluster.isPending || (quotations?.length ?? 0) < 2}
+            >
+              {cluster.isPending ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Sparkles className="mr-2 h-4 w-4" />
+              )}
+              Descubrir temas
+            </Button>
+          </div>
+        )}
       </div>
 
       <div className="flex flex-wrap gap-2">

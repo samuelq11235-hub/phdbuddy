@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Link, useNavigate, useLocation } from "react-router-dom";
+import { Link, useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import { Loader2, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -10,10 +10,16 @@ import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { GoogleButton } from "./GoogleButton";
 
+// We bridge OAuth's redirect-to-callback hop by stashing the post-login
+// destination in sessionStorage before triggering signInWithGoogle().
+// AuthCallbackPage reads + clears it on the return leg.
+const POST_AUTH_REDIRECT_KEY = "phdbuddy.postAuthRedirect";
+
 export function LoginForm() {
   const { signInWithEmail, signInWithGoogle, signInAnonymously } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   const { toast } = useToast();
 
   const [email, setEmail] = useState("");
@@ -21,7 +27,14 @@ export function LoginForm() {
   const [submitting, setSubmitting] = useState(false);
   const [guestLoading, setGuestLoading] = useState(false);
 
-  const from = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname ?? "/app/projects";
+  // Precedence: explicit ?next=<url> > <Link state>.from > default /app/projects.
+  // The /invite/:token flow uses ?next= because it crosses route boundaries
+  // (the InvitePage builds the link itself).
+  const nextParam = searchParams.get("next");
+  const from =
+    nextParam ??
+    (location.state as { from?: { pathname?: string } } | null)?.from?.pathname ??
+    "/app/projects";
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -42,6 +55,9 @@ export function LoginForm() {
 
   async function handleGoogle() {
     try {
+      if (nextParam) {
+        sessionStorage.setItem(POST_AUTH_REDIRECT_KEY, nextParam);
+      }
       await signInWithGoogle();
     } catch (err) {
       toast({
@@ -129,7 +145,10 @@ export function LoginForm() {
 
       <p className="text-center text-sm text-muted-foreground">
         ¿Aún no tienes cuenta?{" "}
-        <Link to="/signup" className="font-medium text-primary hover:underline">
+        <Link
+          to={nextParam ? `/signup?next=${encodeURIComponent(nextParam)}` : "/signup"}
+          className="font-medium text-primary hover:underline"
+        >
           Crear cuenta
         </Link>
       </p>

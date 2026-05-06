@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -10,15 +10,22 @@ import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { GoogleButton } from "./GoogleButton";
 
+// Mirrors LoginForm — see comment there.
+const POST_AUTH_REDIRECT_KEY = "phdbuddy.postAuthRedirect";
+
 export function SignupForm() {
   const { signUpWithEmail, signInWithGoogle } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { toast } = useToast();
 
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  const nextParam = searchParams.get("next");
+  const next = nextParam ?? "/app/projects";
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -37,7 +44,7 @@ export function SignupForm() {
         title: "Te damos la bienvenida a PHDBuddy",
         description: "Tu cuenta se ha creado correctamente.",
       });
-      navigate("/app/projects", { replace: true });
+      navigate(next, { replace: true });
     } catch (err) {
       toast({
         variant: "destructive",
@@ -51,6 +58,9 @@ export function SignupForm() {
 
   async function handleGoogle() {
     try {
+      if (nextParam) {
+        sessionStorage.setItem(POST_AUTH_REDIRECT_KEY, nextParam);
+      }
       await signInWithGoogle();
     } catch (err) {
       toast({
@@ -117,7 +127,10 @@ export function SignupForm() {
 
       <p className="text-center text-sm text-muted-foreground">
         ¿Ya tienes cuenta?{" "}
-        <Link to="/login" className="font-medium text-primary hover:underline">
+        <Link
+          to={nextParam ? `/login?next=${encodeURIComponent(nextParam)}` : "/login"}
+          className="font-medium text-primary hover:underline"
+        >
           Iniciar sesión
         </Link>
       </p>

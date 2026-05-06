@@ -130,6 +130,31 @@ export const api = {
       }[];
     }>("suggest-relations", args);
   },
+
+  sendInvitation(args: {
+    projectId: string;
+    email: string;
+    role: "admin" | "coder" | "viewer";
+    appOrigin?: string;
+  }) {
+    return invoke<{
+      ok: true;
+      invitationId: string;
+      token: string;
+      inviteUrl: string;
+      email: string;
+      role: string;
+    }>("send-invitation", args);
+  },
+
+  acceptInvitation(args: { token: string }) {
+    return invoke<{
+      ok: true;
+      projectId: string;
+      projectName: string | null;
+      role: "admin" | "coder" | "viewer";
+    }>("accept-invitation", args);
+  },
 };
 
 export async function uploadDocumentFile(

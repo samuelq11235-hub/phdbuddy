@@ -2,19 +2,20 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/useAuth";
-import type { Project, ProjectInsert } from "@/types/database";
+import type { Project, ProjectInsert, ProjectWithRole } from "@/types/database";
 
+// We list via the my_projects_with_role() RPC so the UI gets the
+// caller's role per project in a single round-trip — needed for the
+// projects grid to render role-aware actions (only owners can delete,
+// etc.) post-F5 multi-user.
 export function useProjects() {
   const { user } = useAuth();
   return useQuery({
     queryKey: ["projects", user?.id],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("projects")
-        .select("*")
-        .order("updated_at", { ascending: false });
+      const { data, error } = await supabase.rpc("my_projects_with_role");
       if (error) throw error;
-      return data as Project[];
+      return (data ?? []) as ProjectWithRole[];
     },
     enabled: !!user,
   });

@@ -3,11 +3,14 @@ import { Plus, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useDocuments } from "@/hooks/useDocuments";
+import { canWrite, useMyRole } from "@/hooks/useMembers";
 import { DocumentItem } from "./DocumentItem";
 import { AddDocumentDialog } from "./AddDocumentDialog";
 
 export function DocumentsPanel({ projectId }: { projectId: string }) {
   const { data, isLoading } = useDocuments(projectId);
+  const { data: myRole } = useMyRole(projectId);
+  const writable = canWrite(myRole);
 
   return (
     <div className="space-y-4">
@@ -18,15 +21,17 @@ export function DocumentsPanel({ projectId }: { projectId: string }) {
             Sube fuentes para este proyecto. Cada una se extrae, fragmenta e incrusta.
           </p>
         </div>
-        <AddDocumentDialog
-          projectId={projectId}
-          trigger={
-            <Button>
-              <Plus className="mr-2 h-4 w-4" />
-              Añadir documento
-            </Button>
-          }
-        />
+        {writable && (
+          <AddDocumentDialog
+            projectId={projectId}
+            trigger={
+              <Button>
+                <Plus className="mr-2 h-4 w-4" />
+                Añadir documento
+              </Button>
+            }
+          />
+        )}
       </div>
 
       {isLoading ? (
@@ -48,17 +53,21 @@ export function DocumentsPanel({ projectId }: { projectId: string }) {
           </div>
           <h3 className="mt-4 text-lg font-semibold">Aún no hay documentos</h3>
           <p className="mx-auto mt-2 max-w-sm text-sm text-muted-foreground">
-            Añade entrevistas, transcripciones, notas de campo o cualquier fuente de texto que quieras analizar.
+            {writable
+              ? "Añade entrevistas, transcripciones, notas de campo o cualquier fuente de texto que quieras analizar."
+              : "Aún no hay fuentes en este proyecto. Pide a alguien con rol de codificador o admin que añada documentos."}
           </p>
-          <AddDocumentDialog
-            projectId={projectId}
-            trigger={
-              <Button className="mt-6">
-                <Plus className="mr-2 h-4 w-4" />
-                Añadir tu primer documento
-              </Button>
-            }
-          />
+          {writable && (
+            <AddDocumentDialog
+              projectId={projectId}
+              trigger={
+                <Button className="mt-6">
+                  <Plus className="mr-2 h-4 w-4" />
+                  Añadir tu primer documento
+                </Button>
+              }
+            />
+          )}
         </div>
       )}
     </div>
