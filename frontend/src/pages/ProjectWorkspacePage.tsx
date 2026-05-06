@@ -6,7 +6,6 @@ import {
   Quote,
   NotebookPen,
   Network as NetworkIcon,
-  Sparkles,
   ArrowLeft,
   LayoutGrid,
   Users,
@@ -29,7 +28,7 @@ import { CodeDocumentMatrix } from "@/components/codes/CodeDocumentMatrix";
 import { QuotationsPanel } from "@/components/quotations/QuotationsPanel";
 import { MemosPanel } from "@/components/memos/MemosPanel";
 import { CodeNetworkPanel } from "@/components/network/CodeNetworkPanel";
-import { ChatPanel } from "@/components/ai/ChatPanel";
+import { FloatingChatWidget } from "@/components/ai/FloatingChatWidget";
 import { MembersPanelGate } from "@/components/projects/MembersPanel";
 import { ExportButton } from "@/components/projects/ExportButton";
 import { AgreementPanel } from "@/components/agreement/AgreementPanel";
@@ -48,7 +47,6 @@ const VALID_TABS = [
   "network",
   "query",
   "analysis",
-  "chat",
   "agreement",
   "activity",
   "members",
@@ -153,7 +151,6 @@ export default function ProjectWorkspacePage() {
           <TabTrigger value="network" icon={NetworkIcon}>Red</TabTrigger>
           <TabTrigger value="query" icon={Search}>Consultas</TabTrigger>
           <TabTrigger value="analysis" icon={BarChart3}>Análisis</TabTrigger>
-          <TabTrigger value="chat" icon={Sparkles}>Chat IA</TabTrigger>
           <TabTrigger value="agreement" icon={ShieldCheck}>Acuerdo</TabTrigger>
           <TabTrigger value="activity" icon={Activity}>Actividad</TabTrigger>
           <TabTrigger value="members" icon={Users}>Miembros</TabTrigger>
@@ -187,9 +184,6 @@ export default function ProjectWorkspacePage() {
           <TabsContent value="query">
             <QueryBuilderPanel projectId={projectId} />
           </TabsContent>
-          <TabsContent value="chat">
-            <ChatPanel projectId={projectId} />
-          </TabsContent>
           <TabsContent value="agreement">
             <AgreementPanel projectId={projectId} />
           </TabsContent>
@@ -201,6 +195,8 @@ export default function ProjectWorkspacePage() {
           </TabsContent>
         </div>
       </Tabs>
+
+      <FloatingChatWidget projectId={projectId} />
     </div>
   );
 }
