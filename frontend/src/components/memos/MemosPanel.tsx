@@ -3,8 +3,8 @@ import { Plus, NotebookPen, Trash2, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
+import { RichTextEditor } from "@/components/memos/RichTextEditor";
 import {
   Dialog,
   DialogClose,
@@ -187,12 +187,12 @@ function MemoEditor({ memo, onDelete }: { memo: Memo; onDelete: () => void }) {
           </SelectContent>
         </Select>
       </div>
-      <Textarea
+      <RichTextEditor
         value={content}
-        onChange={(e) => setContent(e.target.value)}
-        rows={18}
-        placeholder="Escribe aquí tu memo. Se admite Markdown."
-        className="flex-1 resize-none font-mono text-sm leading-relaxed"
+        onChange={setContent}
+        placeholder="Escribe aquí tu memo. Negrita, listas, enlaces y citas disponibles en la barra superior."
+        className="flex-1"
+        minHeight={360}
       />
       <div className="flex items-center justify-end gap-2">
         <Button variant="ghost" disabled={!dirty} onClick={() => {

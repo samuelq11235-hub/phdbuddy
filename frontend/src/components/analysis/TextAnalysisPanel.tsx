@@ -4,8 +4,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Loader2, BarChart3, Search, Network as NetworkIcon } from "lucide-react";
+import { Loader2, BarChart3, Search, Network as NetworkIcon, Smile } from "lucide-react";
 import { useTextFrequency, useTextKwic, useCooccurrence } from "@/hooks/useTextAnalysis";
+import { SentimentDashboard } from "@/components/analysis/SentimentDashboard";
+import { WordCloud } from "@/components/analysis/WordCloud";
 
 interface Props {
   projectId: string;
@@ -25,13 +27,17 @@ export function TextAnalysisPanel({ projectId }: Props) {
       <Tabs defaultValue="frequency">
         <TabsList>
           <TabsTrigger value="frequency"><BarChart3 className="mr-1.5 h-4 w-4" />Frecuencias</TabsTrigger>
+          <TabsTrigger value="cloud"><BarChart3 className="mr-1.5 h-4 w-4" />Word cloud</TabsTrigger>
           <TabsTrigger value="kwic"><Search className="mr-1.5 h-4 w-4" />KWIC</TabsTrigger>
           <TabsTrigger value="cooc"><NetworkIcon className="mr-1.5 h-4 w-4" />Co-ocurrencia</TabsTrigger>
+          <TabsTrigger value="sentiment"><Smile className="mr-1.5 h-4 w-4" />Sentimiento</TabsTrigger>
         </TabsList>
         <div className="mt-4">
           <TabsContent value="frequency"><FrequencyTab projectId={projectId} /></TabsContent>
+          <TabsContent value="cloud"><WordCloud projectId={projectId} /></TabsContent>
           <TabsContent value="kwic"><KwicTab projectId={projectId} /></TabsContent>
           <TabsContent value="cooc"><CooccurrenceTab projectId={projectId} /></TabsContent>
+          <TabsContent value="sentiment"><SentimentDashboard projectId={projectId} /></TabsContent>
         </div>
       </Tabs>
     </div>
