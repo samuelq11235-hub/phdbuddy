@@ -112,5 +112,11 @@ verify_jwt = true
 [functions.import-project]
 verify_jwt = true
 
+[functions.compute-agreement]
+verify_jwt = true
+
+[functions.execute-query]
+verify_jwt = true
+
 [analytics]
 enabled = false

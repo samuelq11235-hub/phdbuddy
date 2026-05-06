@@ -29,7 +29,7 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import type { DocumentKind } from "@/types/database";
 
-const MAX_FILE_SIZE = 50 * 1024 * 1024;
+const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500 MiB to allow video uploads
 
 const KIND_OPTIONS: { value: DocumentKind; label: string }[] = [
   { value: "interview", label: "Entrevista" },
@@ -38,8 +38,26 @@ const KIND_OPTIONS: { value: DocumentKind; label: string }[] = [
   { value: "field_notes", label: "Notas de campo" },
   { value: "survey", label: "Encuesta de respuesta abierta" },
   { value: "literature", label: "Literatura" },
+  { value: "image", label: "Imagen" },
+  { value: "audio", label: "Audio" },
+  { value: "video", label: "Vídeo" },
   { value: "other", label: "Otro" },
 ];
+
+// File-type hints for the dropzone — Konva/wavesurfer don't enforce
+// these, the backend `process-document` does the actual branching.
+const ACCEPT_BY_KIND: Record<DocumentKind, Record<string, string[]>> = {
+  interview: { "application/pdf": [".pdf"], "text/plain": [".txt", ".md"] },
+  focus_group: { "application/pdf": [".pdf"], "text/plain": [".txt", ".md"] },
+  transcript: { "application/pdf": [".pdf"], "text/plain": [".txt", ".md"] },
+  field_notes: { "application/pdf": [".pdf"], "text/plain": [".txt", ".md"] },
+  survey: { "application/pdf": [".pdf"], "text/plain": [".txt", ".md", ".csv"] },
+  literature: { "application/pdf": [".pdf"], "text/plain": [".txt", ".md"] },
+  other: { "application/pdf": [".pdf"], "text/plain": [".txt", ".md"] },
+  image: { "image/*": [".png", ".jpg", ".jpeg", ".webp", ".gif"] },
+  audio: { "audio/*": [".mp3", ".wav", ".ogg", ".m4a", ".webm"] },
+  video: { "video/*": [".mp4", ".webm", ".mov", ".mkv"] },
+};
 
 export function AddDocumentDialog({
   projectId,
@@ -70,7 +88,7 @@ export function AddDocumentDialog({
 
   const { getRootProps, getInputProps, isDragActive, fileRejections } = useDropzone({
     onDrop,
-    accept: {
+    accept: ACCEPT_BY_KIND[kind] ?? {
       "application/pdf": [".pdf"],
       "text/plain": [".txt", ".md"],
     },

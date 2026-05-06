@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/useAuth";
 import { api } from "@/lib/api";
-import type { Code, Quotation } from "@/types/database";
+import type { Code, Quotation, SelectionMeta } from "@/types/database";
 
 export interface QuotationWithCodes extends Quotation {
   codes: Code[];
@@ -102,11 +102,12 @@ export function useCreateQuotation() {
     mutationFn: async (input: {
       projectId: string;
       documentId: string;
-      startOffset: number;
-      endOffset: number;
+      startOffset?: number | null;
+      endOffset?: number | null;
       content: string;
       comment?: string;
       codeIds?: string[];
+      selectionMeta?: SelectionMeta;
     }) => {
       if (!user) throw new Error("No has iniciado sesión");
       const { data, error } = await supabase
@@ -115,10 +116,11 @@ export function useCreateQuotation() {
           user_id: user.id,
           project_id: input.projectId,
           document_id: input.documentId,
-          start_offset: input.startOffset,
-          end_offset: input.endOffset,
+          start_offset: input.startOffset ?? null,
+          end_offset: input.endOffset ?? null,
           content: input.content,
           comment: input.comment ?? null,
+          selection_meta: input.selectionMeta ?? { type: "text" },
         })
         .select()
         .single();

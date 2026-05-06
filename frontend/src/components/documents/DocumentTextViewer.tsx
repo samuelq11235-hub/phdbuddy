@@ -339,13 +339,19 @@ function ActiveQuotationPanel({
 
 function buildSegments(text: string, quotations: QuotationWithCodes[]): SegmentInfo[] {
   if (text.length === 0) return [];
-  if (quotations.length === 0) {
+  // Skip multimedia quotations (image area / time range): they have no
+  // character offsets and don't belong in a text segmentation pass.
+  const textQuotations = quotations.filter(
+    (q): q is QuotationWithCodes & { start_offset: number; end_offset: number } =>
+      q.start_offset !== null && q.end_offset !== null
+  );
+  if (textQuotations.length === 0) {
     return [{ text, start: 0, end: text.length, quotations: [] }];
   }
 
   // Collect unique split points from all quotation boundaries.
   const points = new Set<number>([0, text.length]);
-  for (const q of quotations) {
+  for (const q of textQuotations) {
     points.add(Math.max(0, Math.min(text.length, q.start_offset)));
     points.add(Math.max(0, Math.min(text.length, q.end_offset)));
   }
@@ -356,7 +362,7 @@ function buildSegments(text: string, quotations: QuotationWithCodes[]): SegmentI
     const end = sorted[i + 1];
     if (start >= end) continue;
     const segText = text.slice(start, end);
-    const overlapping = quotations.filter(
+    const overlapping = textQuotations.filter(
       (q) => q.start_offset < end && q.end_offset > start
     );
     segments.push({ text: segText, start, end, quotations: overlapping });

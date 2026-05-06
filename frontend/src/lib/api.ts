@@ -4,6 +4,7 @@ import type {
   CodebookSuggestionPayload,
   ChatMessage,
   CodeNetworkResponse,
+  QueryNode,
   ThemeSuggestionPayload,
 } from "@/types/database";
 
@@ -167,6 +168,49 @@ export const api = {
       sizeBytes: number;
     }>("export-project", args);
   },
+
+  executeQuery(args: { projectId: string; query: QueryNode }) {
+    return invoke<{
+      ok: true;
+      quotationIds: string[];
+      total: number;
+      capped?: boolean;
+    }>("execute-query", args);
+  },
+
+  computeAgreement(args: {
+    projectId: string;
+    userA: string;
+    userB: string;
+    documentIds?: string[];
+  }) {
+    return invoke<{
+      ok: true;
+      perCode: Array<{
+        code_id: string;
+        code_name: string;
+        a_only: number;
+        b_only: number;
+        both: number;
+        neither: number;
+        kappa: number | null;
+        percentAgreement: number;
+      }>;
+      global: {
+        alpha: number | null;
+        simpleAgreement: number | null;
+        kappa: number | null;
+        n: number;
+        bucketsPerDocument: number;
+      };
+      discrepancies: Array<{
+        quotation_id: string;
+        a_codes: string[];
+        b_codes: string[];
+      }>;
+    }>("compute-agreement", args);
+  },
+
 };
 
 // Import uses multipart/form-data — can't use the generic invoke() helper.

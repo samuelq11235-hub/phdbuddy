@@ -10,6 +10,9 @@ import {
   MoreVertical,
   Trash2,
   RefreshCw,
+  Image as ImageIcon,
+  AudioWaveform,
+  Video,
 } from "lucide-react";
 
 import {
@@ -32,6 +35,9 @@ const ICONS: Record<DocumentKind, React.ComponentType<{ className?: string }>> =
   literature: Library,
   transcript: MessageSquareText,
   other: FileText,
+  image: ImageIcon,
+  audio: AudioWaveform,
+  video: Video,
 };
 
 const KIND_LABELS: Record<DocumentKind, string> = {
@@ -42,6 +48,9 @@ const KIND_LABELS: Record<DocumentKind, string> = {
   literature: "Literatura",
   transcript: "Transcripción",
   other: "Documento",
+  image: "Imagen",
+  audio: "Audio",
+  video: "Vídeo",
 };
 
 export function DocumentItem({

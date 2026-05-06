@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/useAuth";
 import { api, uploadDocumentFile } from "@/lib/api";
-import type { Document, DocumentKind } from "@/types/database";
+import type { Document, DocumentKind, DocumentTranscriptSegment } from "@/types/database";
 
 export function useDocuments(projectId: string | undefined) {
   return useQuery({
@@ -145,6 +145,42 @@ export function useDeleteDocument() {
     onSuccess: (doc) => {
       qc.invalidateQueries({ queryKey: ["documents", doc.project_id] });
     },
+  });
+}
+
+export function useDocumentTranscript(documentId: string | undefined) {
+  return useQuery({
+    queryKey: ["document-transcript", documentId],
+    queryFn: async (): Promise<DocumentTranscriptSegment[]> => {
+      if (!documentId) return [];
+      const { data, error } = await supabase
+        .from("document_transcript")
+        .select("*")
+        .eq("document_id", documentId)
+        .order("segment_index", { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as DocumentTranscriptSegment[];
+    },
+    enabled: !!documentId,
+  });
+}
+
+// Generates a 5-minute signed URL for a private storage object. Used by
+// the multimedia viewers (image, audio, video) so the browser can fetch
+// the file without exposing the original storage path.
+export function useSignedDocumentUrl(storagePath: string | null | undefined) {
+  return useQuery({
+    queryKey: ["signed-doc-url", storagePath],
+    queryFn: async (): Promise<string | null> => {
+      if (!storagePath) return null;
+      const { data, error } = await supabase.storage
+        .from("documents")
+        .createSignedUrl(storagePath, 60 * 5);
+      if (error) throw error;
+      return data?.signedUrl ?? null;
+    },
+    enabled: !!storagePath,
+    staleTime: 1000 * 60 * 4, // refresh just before expiry
   });
 }
 

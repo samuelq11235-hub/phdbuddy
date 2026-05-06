@@ -10,7 +10,65 @@ export type DocumentKind =
   | "survey"
   | "literature"
   | "transcript"
-  | "other";
+  | "other"
+  | "image"
+  | "audio"
+  | "video";
+
+export type SelectionKind = "text" | "image_area" | "timerange";
+
+export interface TextSelection {
+  type: "text";
+}
+export interface ImageAreaSelection {
+  type: "image_area";
+  bbox: [number, number, number, number]; // x, y, w, h in image px
+  page?: number;
+}
+export interface TimerangeSelection {
+  type: "timerange";
+  startMs: number;
+  endMs: number;
+}
+export type SelectionMeta =
+  | TextSelection
+  | ImageAreaSelection
+  | TimerangeSelection;
+
+// =====================================================
+// Boolean queries (F11)
+// =====================================================
+export type QueryNode =
+  | { op: "and"; children: QueryNode[] }
+  | { op: "or"; children: QueryNode[] }
+  | { op: "not"; child: QueryNode }
+  | { op: "code"; codeId: string }
+  | { op: "document"; documentId: string }
+  | { op: "sentiment"; label: "positive" | "negative" | "neutral" | "mixed" }
+  | { op: "cooccurs"; a: string; b: string };
+
+export interface SavedQuery {
+  id: string;
+  user_id: string;
+  project_id: string;
+  name: string;
+  description: string | null;
+  definition: QueryNode;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DocumentTranscriptSegment {
+  id: string;
+  document_id: string;
+  segment_index: number;
+  start_ms: number;
+  end_ms: number;
+  text: string;
+  speaker: string | null;
+  confidence: number | null;
+  created_at: string;
+}
 
 export type MemoType = "analytic" | "methodological" | "theoretical" | "reflective";
 
@@ -172,10 +230,11 @@ export interface Quotation {
   user_id: string;
   project_id: string;
   document_id: string;
-  start_offset: number;
-  end_offset: number;
+  start_offset: number | null;
+  end_offset: number | null;
   content: string;
   comment: string | null;
+  selection_meta: SelectionMeta;
   embedding: number[] | null;
   created_by_ai: boolean;
   created_at: string;

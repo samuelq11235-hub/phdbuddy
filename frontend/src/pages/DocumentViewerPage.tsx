@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { ArrowLeft, AlertCircle, Loader2 } from "lucide-react";
 
@@ -6,10 +6,20 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/documents/StatusBadge";
 import { DocumentTextViewer } from "@/components/documents/DocumentTextViewer";
+import { ImageDocumentViewer } from "@/components/documents/ImageDocumentViewer";
+import { AudioDocumentViewer } from "@/components/documents/AudioDocumentViewer";
+import { VideoDocumentViewer } from "@/components/documents/VideoDocumentViewer";
+import { AddQuotationDialog } from "@/components/quotations/AddQuotationDialog";
 import { AutoCodeButton } from "@/components/ai/AutoCodeButton";
-import { useDocument, useReprocessDocument } from "@/hooks/useDocuments";
+import {
+  useDocument,
+  useDocumentTranscript,
+  useReprocessDocument,
+  useSignedDocumentUrl,
+} from "@/hooks/useDocuments";
 import { useDocumentQuotations } from "@/hooks/useQuotations";
 import { useToast } from "@/hooks/use-toast";
+import type { SelectionMeta } from "@/types/database";
 
 export default function DocumentViewerPage() {
   const { projectId, documentId } = useParams<{ projectId: string; documentId: string }>();
@@ -17,8 +27,23 @@ export default function DocumentViewerPage() {
   const highlightQuotationId = searchParams.get("quotation") ?? undefined;
   const { data: document, isLoading } = useDocument(documentId);
   const { data: quotations } = useDocumentQuotations(documentId);
+  const { data: transcript } = useDocumentTranscript(
+    document?.kind === "audio" || document?.kind === "video" ? documentId : undefined
+  );
+  const { data: signedUrl } = useSignedDocumentUrl(
+    document?.kind === "image" || document?.kind === "audio" || document?.kind === "video"
+      ? document?.storage_path ?? undefined
+      : undefined
+  );
   const reprocess = useReprocessDocument();
   const { toast } = useToast();
+
+  const [pendingSelection, setPendingSelection] = useState<{
+    start: number | null;
+    end: number | null;
+    content: string;
+    meta?: SelectionMeta;
+  } | null>(null);
 
   useEffect(() => {
     if (document) window.document.title = `${document.title} — PHDBuddy`;
@@ -109,6 +134,75 @@ export default function DocumentViewerPage() {
             Extrayendo texto, fragmentando e incrustando. Suele tardar unos segundos.
           </p>
         </div>
+      ) : document.kind === "image" ? (
+        signedUrl ? (
+          <article className="rounded-xl border bg-card p-4">
+            <ImageDocumentViewer
+              imageUrl={signedUrl}
+              quotations={quotations ?? []}
+              onCreateRect={(bbox) =>
+                setPendingSelection({
+                  start: null,
+                  end: null,
+                  content: `(área ${bbox.join(",")})`,
+                  meta: { type: "image_area", bbox },
+                })
+              }
+            />
+            {document.full_text && (
+              <details className="mt-4">
+                <summary className="cursor-pointer text-sm font-medium">
+                  Descripción y texto reconocido
+                </summary>
+                <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">
+                  {document.full_text}
+                </p>
+              </details>
+            )}
+          </article>
+        ) : (
+          <Skeleton className="h-96" />
+        )
+      ) : document.kind === "audio" ? (
+        signedUrl ? (
+          <article className="rounded-xl border bg-card p-4">
+            <AudioDocumentViewer
+              audioUrl={signedUrl}
+              segments={transcript ?? []}
+              quotations={quotations ?? []}
+              onCreateRange={(startMs, endMs, contentText) =>
+                setPendingSelection({
+                  start: null,
+                  end: null,
+                  content: contentText,
+                  meta: { type: "timerange", startMs, endMs },
+                })
+              }
+            />
+          </article>
+        ) : (
+          <Skeleton className="h-64" />
+        )
+      ) : document.kind === "video" ? (
+        signedUrl ? (
+          <article className="rounded-xl border bg-card p-4">
+            <VideoDocumentViewer
+              videoUrl={signedUrl}
+              segments={transcript ?? []}
+              quotations={quotations ?? []}
+              onCreateRange={(startMs, endMs, contentText) =>
+                setPendingSelection({
+                  start: null,
+                  end: null,
+                  content: contentText,
+                  meta: { type: "timerange", startMs, endMs },
+                })
+              }
+            />
+          </article>
+        ) : (
+          <Skeleton className="h-96" />
+        )
       ) : !document.full_text ? (
         <div className="rounded-xl border bg-card p-12 text-center">
           <p className="text-sm text-muted-foreground">No hay contenido textual disponible.</p>
@@ -124,6 +218,17 @@ export default function DocumentViewerPage() {
           />
         </article>
       )}
+
+      {/* Multimedia: dialog driven by parent state because the viewers
+          themselves don't own a quotation form. */}
+      <AddQuotationDialog
+        open={!!pendingSelection}
+        onOpenChange={(o) => !o && setPendingSelection(null)}
+        projectId={projectId}
+        documentId={documentId}
+        selection={pendingSelection}
+        fullText={document.full_text ?? ""}
+      />
 
       <p className="mt-6 text-center text-xs text-muted-foreground">
         Tip: selecciona cualquier fragmento para crear una cita. Usa <strong>Auto-codificar con IA</strong> para

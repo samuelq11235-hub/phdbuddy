@@ -18,7 +18,7 @@ import { useCodes, useCreateCode, colorForName } from "@/hooks/useCodes";
 import { useCreateQuotation } from "@/hooks/useQuotations";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api";
-import type { Code } from "@/types/database";
+import type { Code, SelectionMeta } from "@/types/database";
 
 interface SuggestedNewCode {
   name: string;
@@ -46,7 +46,17 @@ export function AddQuotationDialog({
   onOpenChange: (open: boolean) => void;
   projectId: string;
   documentId: string;
-  selection: { start: number; end: number; content: string } | null;
+  selection: {
+    // start/end are character offsets for text selections; null for image / time-range.
+    start: number | null;
+    end: number | null;
+    content: string;
+    // Selection metadata is forwarded into quotations.selection_meta. Defaults
+    // to plain text when omitted (preserves existing behaviour for the text viewer).
+    meta?: SelectionMeta;
+  } | null;
+  // Optional — only used by AI suggestions for text selections. Multimedia
+  // viewers pass an empty string to skip the AI suggest button gracefully.
   fullText: string;
 }) {
   const [selectedCodeIds, setSelectedCodeIds] = useState<string[]>([]);
@@ -94,10 +104,19 @@ export function AddQuotationDialog({
     if (!selection) return;
     setAiSuggesting(true);
     try {
-      const start = Math.max(0, selection.start - 300);
-      const end = Math.min(fullText.length, selection.end + 300);
-      const contextBefore = fullText.slice(start, selection.start);
-      const contextAfter = fullText.slice(selection.end, end);
+      // Multimedia selections (image / timerange) lack character offsets.
+      // Send the literal content to Claude without surrounding context.
+      const hasOffsets = selection.start !== null && selection.end !== null;
+      const start = hasOffsets ? Math.max(0, (selection.start as number) - 300) : 0;
+      const end = hasOffsets
+        ? Math.min(fullText.length, (selection.end as number) + 300)
+        : 0;
+      const contextBefore = hasOffsets
+        ? fullText.slice(start, selection.start as number)
+        : "";
+      const contextAfter = hasOffsets
+        ? fullText.slice(selection.end as number, end)
+        : "";
       const resp = await api.suggestCodesForQuote({
         projectId,
         documentId,
@@ -175,6 +194,7 @@ export function AddQuotationDialog({
         content: selection.content,
         comment: comment.trim() || undefined,
         codeIds: selectedCodeIds,
+        selectionMeta: selection.meta,
       });
       toast({ title: "Cita guardada" });
       onOpenChange(false);

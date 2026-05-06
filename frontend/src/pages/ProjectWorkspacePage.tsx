@@ -10,6 +10,8 @@ import {
   ArrowLeft,
   LayoutGrid,
   Users,
+  ShieldCheck,
+  Search,
 } from "lucide-react";
 
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -27,6 +29,8 @@ import { CodeNetworkPanel } from "@/components/network/CodeNetworkPanel";
 import { ChatPanel } from "@/components/ai/ChatPanel";
 import { MembersPanelGate } from "@/components/projects/MembersPanel";
 import { ExportButton } from "@/components/projects/ExportButton";
+import { AgreementPanel } from "@/components/agreement/AgreementPanel";
+import { QueryBuilderPanel } from "@/components/query/QueryBuilderPanel";
 
 const VALID_TABS = [
   "documents",
@@ -35,7 +39,9 @@ const VALID_TABS = [
   "matrix",
   "memos",
   "network",
+  "query",
   "chat",
+  "agreement",
   "members",
 ] as const;
 type TabId = (typeof VALID_TABS)[number];
@@ -135,7 +141,9 @@ export default function ProjectWorkspacePage() {
           <TabTrigger value="matrix" icon={LayoutGrid}>Matriz</TabTrigger>
           <TabTrigger value="memos" icon={NotebookPen}>Memos</TabTrigger>
           <TabTrigger value="network" icon={NetworkIcon}>Red</TabTrigger>
+          <TabTrigger value="query" icon={Search}>Consultas</TabTrigger>
           <TabTrigger value="chat" icon={Sparkles}>Chat IA</TabTrigger>
+          <TabTrigger value="agreement" icon={ShieldCheck}>Acuerdo</TabTrigger>
           <TabTrigger value="members" icon={Users}>Miembros</TabTrigger>
         </TabsList>
 
@@ -158,8 +166,14 @@ export default function ProjectWorkspacePage() {
           <TabsContent value="network">
             <CodeNetworkPanel projectId={projectId} />
           </TabsContent>
+          <TabsContent value="query">
+            <QueryBuilderPanel projectId={projectId} />
+          </TabsContent>
           <TabsContent value="chat">
             <ChatPanel projectId={projectId} />
+          </TabsContent>
+          <TabsContent value="agreement">
+            <AgreementPanel projectId={projectId} />
           </TabsContent>
           <TabsContent value="members">
             <MembersPanelGate projectId={projectId} />

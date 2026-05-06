@@ -52,7 +52,13 @@ export function CodeMargin({
         setBars([]);
         return;
       }
-      if (quotations.length === 0) {
+      // Multimedia quotations (image area / time range) carry null
+      // offsets and don't belong in a text-margin overlay.
+      const textQuotations = quotations.filter(
+        (q): q is typeof q & { start_offset: number; end_offset: number } =>
+          q.start_offset !== null && q.end_offset !== null
+      );
+      if (textQuotations.length === 0) {
         setBars([]);
         return;
       }
@@ -85,7 +91,7 @@ export function CodeMargin({
         return;
       }
 
-      const sorted = [...quotations].sort((a, b) => {
+      const sorted = [...textQuotations].sort((a, b) => {
         if (a.start_offset !== b.start_offset) return a.start_offset - b.start_offset;
         return a.end_offset - b.end_offset;
       });
