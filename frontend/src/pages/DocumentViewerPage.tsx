@@ -9,6 +9,7 @@ import { DocumentTextViewer } from "@/components/documents/DocumentTextViewer";
 import { ImageDocumentViewer } from "@/components/documents/ImageDocumentViewer";
 import { AudioDocumentViewer } from "@/components/documents/AudioDocumentViewer";
 import { VideoDocumentViewer } from "@/components/documents/VideoDocumentViewer";
+import { PdfDocumentViewer } from "@/components/documents/PdfDocumentViewer";
 import { AddQuotationDialog } from "@/components/quotations/AddQuotationDialog";
 import { AutoCodeButton } from "@/components/ai/AutoCodeButton";
 import {
@@ -31,8 +32,18 @@ export default function DocumentViewerPage() {
     document?.kind === "audio" || document?.kind === "video" ? documentId : undefined,
     { documentStatus: document?.status }
   );
+  // Detect PDF source: any document whose storage_path ends in .pdf can
+  // be viewed graphically with the new PdfDocumentViewer (F19), even if
+  // it was uploaded as kind="literature" with text already extracted.
+  const isPdfSource =
+    !!document?.storage_path && document.storage_path.toLowerCase().endsWith(".pdf");
+  const [pdfMode, setPdfMode] = useState(false);
+
   const { data: signedUrl } = useSignedDocumentUrl(
-    document?.kind === "image" || document?.kind === "audio" || document?.kind === "video"
+    document?.kind === "image" ||
+      document?.kind === "audio" ||
+      document?.kind === "video" ||
+      (isPdfSource && pdfMode)
       ? document?.storage_path ?? undefined
       : undefined
   );
@@ -99,6 +110,16 @@ export default function DocumentViewerPage() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {isPdfSource && (
+            <Button
+              variant={pdfMode ? "default" : "outline"}
+              size="sm"
+              onClick={() => setPdfMode((v) => !v)}
+              title="Alterna entre la vista textual y la vista PDF con anotaciones gráficas"
+            >
+              {pdfMode ? "Vista texto" : "Vista PDF"}
+            </Button>
+          )}
           <AutoCodeButton
             documentId={documentId}
             documentReady={document.status === "ready"}
@@ -197,6 +218,25 @@ export default function DocumentViewerPage() {
                   end: null,
                   content: contentText,
                   meta: { type: "timerange", startMs, endMs },
+                })
+              }
+            />
+          </article>
+        ) : (
+          <Skeleton className="h-96" />
+        )
+      ) : isPdfSource && pdfMode ? (
+        signedUrl ? (
+          <article className="rounded-xl border bg-card p-4">
+            <PdfDocumentViewer
+              pdfUrl={signedUrl}
+              quotations={quotations ?? []}
+              onCreateRect={(bbox, page) =>
+                setPendingSelection({
+                  start: null,
+                  end: null,
+                  content: `(área en página ${page}: ${bbox.map((n) => Math.round(n)).join(",")})`,
+                  meta: { type: "image_area", bbox, page },
                 })
               }
             />
