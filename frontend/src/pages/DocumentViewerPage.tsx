@@ -28,7 +28,8 @@ export default function DocumentViewerPage() {
   const { data: document, isLoading } = useDocument(documentId);
   const { data: quotations } = useDocumentQuotations(documentId);
   const { data: transcript } = useDocumentTranscript(
-    document?.kind === "audio" || document?.kind === "video" ? documentId : undefined
+    document?.kind === "audio" || document?.kind === "video" ? documentId : undefined,
+    { documentStatus: document?.status }
   );
   const { data: signedUrl } = useSignedDocumentUrl(
     document?.kind === "image" || document?.kind === "audio" || document?.kind === "video"

@@ -148,7 +148,14 @@ export function useDeleteDocument() {
   });
 }
 
-export function useDocumentTranscript(documentId: string | undefined) {
+// Audio/video transcript segments. Polls while the parent document is
+// still pending/processing — Whisper takes 10–30 s for short clips, and
+// without the poll the user would otherwise have to manually refresh
+// after upload.
+export function useDocumentTranscript(
+  documentId: string | undefined,
+  opts?: { documentStatus?: string }
+) {
   return useQuery({
     queryKey: ["document-transcript", documentId],
     queryFn: async (): Promise<DocumentTranscriptSegment[]> => {
@@ -162,6 +169,12 @@ export function useDocumentTranscript(documentId: string | undefined) {
       return (data ?? []) as DocumentTranscriptSegment[];
     },
     enabled: !!documentId,
+    refetchInterval: (query) => {
+      const isProcessing =
+        opts?.documentStatus === "pending" || opts?.documentStatus === "processing";
+      const haveData = (query.state.data as DocumentTranscriptSegment[] | undefined)?.length ?? 0;
+      return isProcessing && haveData === 0 ? 3000 : false;
+    },
   });
 }
 

@@ -66,10 +66,10 @@ Deno.serve(async (req) => {
 
   const supabase = getServiceClient();
 
-  // Pre-fetch the universe and indices the AST may need.
-  const [{ data: allQuotaRows }, { data: qcRows }, { data: sentimentRows }] = await Promise.all([
+  // Pre-fetch the project's quotations + sentiment first; that gives us
+  // the project-scoped IDs needed to safely query quotation_codes.
+  const [{ data: allQuotaRows }, { data: sentimentRows }] = await Promise.all([
     supabase.from("quotations").select("id, document_id").eq("project_id", projectId),
-    supabase.from("quotation_codes").select("quotation_id, code_id"),
     supabase.from("quotation_sentiment").select("quotation_id, label").eq("project_id", projectId),
   ]);
 
@@ -81,14 +81,30 @@ Deno.serve(async (req) => {
     if (!s) { s = new Set(); docIndex.set(q.document_id, s); }
     s.add(q.id);
   }
+
+  // quotation_codes has no project_id column. With service-role we'd
+  // otherwise scan the whole DB; filter explicitly by this project's
+  // quotations instead. (Same fix as in export-project.)
   const codeIndex = new Map<string, Set<string>>();
-  // Filter qcRows to only those quotations that belong to the project
-  // (quotation_codes lacks project_id; service-role would otherwise leak).
-  for (const qc of (qcRows ?? []) as Array<{ quotation_id: string; code_id: string }>) {
-    if (!allSet.has(qc.quotation_id)) continue;
-    let s = codeIndex.get(qc.code_id);
-    if (!s) { s = new Set(); codeIndex.set(qc.code_id, s); }
-    s.add(qc.quotation_id);
+  if (all.length > 0) {
+    const quotationIds = all.map((q) => q.id);
+    // PostgREST .in() uses a query string, which has a length limit
+    // (~16 KiB on Supabase). Chunk to stay well under that for huge
+    // projects (a UUID is 36 chars; ~400 IDs ≈ 14 KiB worst case).
+    const CHUNK = 400;
+    for (let i = 0; i < quotationIds.length; i += CHUNK) {
+      const slice = quotationIds.slice(i, i + CHUNK);
+      const { data: qcRows } = await supabase
+        .from("quotation_codes")
+        .select("quotation_id, code_id")
+        .in("quotation_id", slice);
+      for (const qc of (qcRows ?? []) as Array<{ quotation_id: string; code_id: string }>) {
+        if (!allSet.has(qc.quotation_id)) continue;
+        let s = codeIndex.get(qc.code_id);
+        if (!s) { s = new Set(); codeIndex.set(qc.code_id, s); }
+        s.add(qc.quotation_id);
+      }
+    }
   }
   const sentimentIndex = new Map<string, Set<string>>();
   for (const r of (sentimentRows ?? []) as Array<{ quotation_id: string; label: string }>) {

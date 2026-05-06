@@ -28,7 +28,10 @@ export function ImageDocumentViewer({
   onSelectQuotation,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [image] = useImage(imageUrl, "anonymous");
+  // No `crossOrigin` here — Supabase signed URLs don't always send
+  // permissive CORS headers, and we don't read pixel data so we don't
+  // need an "anonymous" tainted-canvas-safe image.
+  const [image] = useImage(imageUrl);
   const [stageWidth, setStageWidth] = useState(800);
   const [drawing, setDrawing] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const isDrawing = useRef(false);

@@ -98,12 +98,18 @@ Deno.serve(async (req) => {
     documents.map((d) => [d.id, Math.max(1, (d.full_text ?? "").length)])
   );
 
-  // Quotations in scope.
+  // Quotations in scope. Multimedia citations have null offsets — they
+  // can't be placed into character buckets, so the κ/α math excludes
+  // them up front. Inter-coder agreement on time-range / image-area
+  // citations is a separate problem (different unit of analysis) we'd
+  // need a dedicated metric for.
   const { data: quotaRows, error: qErr } = await supabase
     .from("quotations")
     .select("id, document_id, start_offset, end_offset")
     .eq("project_id", projectId)
-    .in("document_id", docIds);
+    .in("document_id", docIds)
+    .not("start_offset", "is", null)
+    .not("end_offset", "is", null);
   if (qErr) return errorResponse(qErr.message, 500);
   const quotations = (quotaRows ?? []) as QuotationRow[];
   const quotaMap = new Map(quotations.map((q) => [q.id, q]));
@@ -138,6 +144,7 @@ Deno.serve(async (req) => {
   // Build per-(coder, code, document, bucket) presence sets.
   // bucketKey = `${docId}|${bucketIndex}` to keep it cheap.
   function bucketsForQuotation(q: QuotationRow): number[] {
+    if (q.start_offset == null || q.end_offset == null) return [];
     const len = docLengthMap.get(q.document_id) ?? 1;
     const startBucket = Math.max(
       0,
