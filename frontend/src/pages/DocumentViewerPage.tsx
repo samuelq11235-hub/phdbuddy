@@ -232,8 +232,9 @@ export default function DocumentViewerPage() {
       />
 
       <p className="mt-6 text-center text-xs text-muted-foreground">
-        Tip: selecciona cualquier fragmento para crear una cita. Usa <strong>Auto-codificar con IA</strong> para
-        obtener una primera versión del codebook.
+        Tip: selecciona texto y pulsa <kbd className="rounded border bg-muted px-1">I</kbd> para
+        crear un código in-vivo (cita + código con el mismo texto). Usa <strong>Auto-codificar con IA</strong> para
+        generar el codebook automáticamente.
       </p>
     </div>
   );

@@ -5,6 +5,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ProjectCard } from "@/components/projects/ProjectCard";
 import { NewProjectDialog } from "@/components/projects/NewProjectDialog";
 import { ImportProjectButton } from "@/components/projects/ImportProjectButton";
+import { ImportSurveyButton } from "@/components/projects/ImportSurveyButton";
 import { useProjects } from "@/hooks/useProjects";
 
 export default function ProjectsPage() {
@@ -20,6 +21,7 @@ export default function ProjectsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <ImportSurveyButton />
           <ImportProjectButton />
           <NewProjectDialog
             trigger={

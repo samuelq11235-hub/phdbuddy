@@ -12,6 +12,8 @@ import {
   Users,
   ShieldCheck,
   Search,
+  BarChart3,
+  Folders,
 } from "lucide-react";
 
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -31,15 +33,19 @@ import { MembersPanelGate } from "@/components/projects/MembersPanel";
 import { ExportButton } from "@/components/projects/ExportButton";
 import { AgreementPanel } from "@/components/agreement/AgreementPanel";
 import { QueryBuilderPanel } from "@/components/query/QueryBuilderPanel";
+import { TextAnalysisPanel } from "@/components/analysis/TextAnalysisPanel";
+import { DocumentGroupsPanel } from "@/components/documents/DocumentGroupsPanel";
 
 const VALID_TABS = [
   "documents",
+  "groups",
   "codes",
   "quotations",
   "matrix",
   "memos",
   "network",
   "query",
+  "analysis",
   "chat",
   "agreement",
   "members",
@@ -136,12 +142,14 @@ export default function ProjectWorkspacePage() {
       <Tabs value={tab} onValueChange={(v) => setTab(v as TabId)}>
         <TabsList className="flex w-full flex-wrap justify-start gap-1 bg-transparent p-0">
           <TabTrigger value="documents" icon={FileText}>Documentos</TabTrigger>
+          <TabTrigger value="groups" icon={Folders}>Grupos</TabTrigger>
           <TabTrigger value="codes" icon={Tags}>Codebook</TabTrigger>
           <TabTrigger value="quotations" icon={Quote}>Citas</TabTrigger>
           <TabTrigger value="matrix" icon={LayoutGrid}>Matriz</TabTrigger>
           <TabTrigger value="memos" icon={NotebookPen}>Memos</TabTrigger>
           <TabTrigger value="network" icon={NetworkIcon}>Red</TabTrigger>
           <TabTrigger value="query" icon={Search}>Consultas</TabTrigger>
+          <TabTrigger value="analysis" icon={BarChart3}>Análisis</TabTrigger>
           <TabTrigger value="chat" icon={Sparkles}>Chat IA</TabTrigger>
           <TabTrigger value="agreement" icon={ShieldCheck}>Acuerdo</TabTrigger>
           <TabTrigger value="members" icon={Users}>Miembros</TabTrigger>
@@ -150,6 +158,12 @@ export default function ProjectWorkspacePage() {
         <div className="mt-6">
           <TabsContent value="documents">
             <DocumentsPanel projectId={projectId} />
+          </TabsContent>
+          <TabsContent value="groups">
+            <DocumentGroupsPanel projectId={projectId} />
+          </TabsContent>
+          <TabsContent value="analysis">
+            <TextAnalysisPanel projectId={projectId} />
           </TabsContent>
           <TabsContent value="codes">
             <CodebookPanel projectId={projectId} />

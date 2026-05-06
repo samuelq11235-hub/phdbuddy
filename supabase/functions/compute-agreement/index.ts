@@ -306,6 +306,42 @@ Deno.serve(async (req) => {
   const simpleAgreement = 1 - Do;
 
   // -----------------------------------------------------
+  // Scott's pi — like Cohen's kappa but assumes both coders share the
+  // same marginal distribution of label use (uses the *combined* label
+  // frequencies). For nominal data and 2 coders it's equivalent to
+  // Krippendorff alpha minus the small-sample correction. Useful as a
+  // sanity check next to alpha and kappa.
+  //
+  // Holsti's coefficient — the simplest "raw" reliability index:
+  //   H = 2 * agreements / (decisions_a + decisions_b)
+  // where a "decision" is each (code applied to a unit) by a coder.
+  // Generous compared with kappa because it ignores chance, but it's
+  // a number every methodologist recognises so we report it too.
+  // -----------------------------------------------------
+  let agreementUnits = 0; // per-unit exact label match
+  let aDecisions = 0;
+  let bDecisions = 0;
+  for (const v of unitLabels.values()) {
+    if (v.a === v.b && v.a !== "") agreementUnits++;
+    if (v.a !== "") aDecisions++;
+    if (v.b !== "") bDecisions++;
+  }
+  const holsti =
+    aDecisions + bDecisions > 0
+      ? (2 * agreementUnits) / (aDecisions + bDecisions)
+      : null;
+
+  // Scott's pi: Pe is Σ p_c² where p_c is the *joint* proportion
+  // (count_a + count_b) / (2 * units). Po is the simple agreement.
+  let scottPe = 0;
+  // Reuse labelCounts from alpha (already counts both coders).
+  for (const c of labelCounts.values()) {
+    const p = c / N;
+    scottPe += p * p;
+  }
+  const scottPi = scottPe < 1 ? (simpleAgreement - scottPe) / (1 - scottPe) : null;
+
+  // -----------------------------------------------------
   // Discrepancies: list quotations whose code set differs between A and B.
   // -----------------------------------------------------
   const codingsByQuotation = new Map<string, { a: Set<string>; b: Set<string> }>();
@@ -341,6 +377,8 @@ Deno.serve(async (req) => {
     global: {
       alpha,
       simpleAgreement,
+      scottPi,
+      holsti,
       kappa: perCode.length > 0
         ? perCode.reduce((s, c) => s + (c.kappa ?? 0), 0) / perCode.length
         : null,

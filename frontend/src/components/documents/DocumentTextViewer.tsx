@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Quote, X } from "lucide-react";
+import { Quote, X, Wand2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { CodeBadge } from "@/components/codes/CodeBadge";
-import { useToggleCoding, type QuotationWithCodes } from "@/hooks/useQuotations";
-import { useCodes } from "@/hooks/useCodes";
+import { useCreateQuotation, useToggleCoding, type QuotationWithCodes } from "@/hooks/useQuotations";
+import { useCodes, useCreateCode } from "@/hooks/useCodes";
+import { useToast } from "@/hooks/use-toast";
 import { AddQuotationDialog } from "@/components/quotations/AddQuotationDialog";
 import { CodeMargin } from "@/components/documents/CodeMargin";
 import { cn } from "@/lib/utils";
@@ -38,6 +39,52 @@ export function DocumentTextViewer({
   const [activeQuotationId, setActiveQuotationId] = useState<string | null>(null);
 
   const segments = useMemo(() => buildSegments(fullText, quotations), [fullText, quotations]);
+  const createCode = useCreateCode();
+  const createQuote = useCreateQuotation();
+  const toggle = useToggleCoding();
+  const { toast } = useToast();
+
+  // In-vivo coding (Atlas.ti tradition): take the selected text and use
+  // it as both the code name and the quotation content in a single
+  // action. Triggered by:
+  //   - clicking the "in-vivo" button in the floating action bar, or
+  //   - pressing the "I" key while a selection is active.
+  // Code name is capped at 60 chars and lowercased to match the
+  // unique-name index's behaviour.
+  const inVivoFromSelection = useCallback(
+    async (sel: SelectionState) => {
+      const cleaned = sel.content.trim().replace(/\s+/g, " ");
+      if (!cleaned) return;
+      const codeName = cleaned.slice(0, 60).toLowerCase();
+      try {
+        const code = await createCode.mutateAsync({
+          projectId,
+          name: codeName,
+          description: `Código in-vivo creado desde una cita.`,
+        });
+        const quotation = await createQuote.mutateAsync({
+          projectId,
+          documentId,
+          startOffset: sel.start,
+          endOffset: sel.end,
+          content: cleaned,
+        });
+        await toggle.mutateAsync({
+          quotationId: quotation.id,
+          codeId: code.id,
+          attach: true,
+        });
+        toast({ title: `In-vivo "${codeName}" creado` });
+      } catch (err) {
+        toast({
+          variant: "destructive",
+          title: "No se pudo crear el código in-vivo",
+          description: err instanceof Error ? err.message : undefined,
+        });
+      }
+    },
+    [createCode, createQuote, toggle, projectId, documentId, toast]
+  );
 
   const handleMouseUp = useCallback(() => {
     if (!textRef.current || !containerRef.current) return;
@@ -97,6 +144,26 @@ export function DocumentTextViewer({
     return () => window.removeEventListener("mousedown", onMouseDownGlobal);
   }, []);
 
+  // Keyboard shortcut: "I" while a selection is active fires in-vivo
+  // coding. Skipped when the user is typing in an input/textarea so we
+  // don't hijack their keystrokes inside the dialog.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "i" && e.key !== "I") return;
+      if (!pendingSelection) return;
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      e.preventDefault();
+      const sel = pendingSelection;
+      setPendingSelection(null);
+      setSelectionRect(null);
+      window.getSelection()?.removeAllRanges();
+      void inVivoFromSelection(sel);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [pendingSelection, inVivoFromSelection]);
+
   const activeQuotation = useMemo(
     () => quotations.find((q) => q.id === activeQuotationId) ?? null,
     [quotations, activeQuotationId]
@@ -141,7 +208,7 @@ export function DocumentTextViewer({
       {pendingSelection && selectionRect && (
         <div
           data-floating-action
-          className="absolute z-20 -translate-x-1/2 rounded-full border bg-background shadow-lg"
+          className="absolute z-20 flex -translate-x-1/2 items-center gap-1 rounded-full border bg-background p-1 shadow-lg"
           style={{ top: selectionRect.top, left: selectionRect.left }}
         >
           <Button
@@ -153,6 +220,22 @@ export function DocumentTextViewer({
           >
             <Quote className="mr-1.5 h-3.5 w-3.5" />
             Crear cita
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            className="rounded-full"
+            title="In-vivo (atajo: I) — crea código y cita con el texto seleccionado"
+            onClick={() => {
+              const sel = pendingSelection;
+              setPendingSelection(null);
+              setSelectionRect(null);
+              window.getSelection()?.removeAllRanges();
+              void inVivoFromSelection(sel);
+            }}
+          >
+            <Wand2 className="mr-1.5 h-3.5 w-3.5" />
+            In-vivo
           </Button>
         </div>
       )}

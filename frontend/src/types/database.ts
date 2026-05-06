@@ -546,7 +546,7 @@ export interface DocumentForCodeRow {
 // =====================================================
 // F6 — Exports / Imports
 // =====================================================
-export type ExportFormat = "csv" | "markdown" | "qdaxml";
+export type ExportFormat = "csv" | "markdown" | "qdaxml" | "html";
 export type ExportJobStatus = "pending" | "done" | "error";
 
 export interface ExportJob {
@@ -606,4 +606,104 @@ export interface ProjectInvitation {
 // the caller's role, so the projects list can render role-aware actions.
 export interface ProjectWithRole extends Project {
   role: ProjectRole;
+}
+
+// =====================================================
+// F12 — Quotation hyperlinks
+// =====================================================
+export interface QuotationLink {
+  id: string;
+  user_id: string;
+  project_id: string;
+  from_quotation_id: string;
+  to_quotation_id: string;
+  relation_type_id: string | null;
+  comment: string | null;
+  created_at: string;
+}
+
+// Convenience shape returned by hooks that want to render the link with
+// the relation type name + the target quotation snippet without doing
+// extra fetches in the component.
+export interface QuotationLinkWithContext extends QuotationLink {
+  relation_type_name: string | null;
+  relation_type_color: string | null;
+  to_content: string;
+  to_document_title: string;
+}
+
+// =====================================================
+// F13 — Text analysis (frequency / KWIC / cooccurrence)
+// =====================================================
+export interface FrequencyResult {
+  totalTokens: number;
+  uniqueTerms: number;
+  documentsAnalyzed: number;
+  terms: Array<{ term: string; count: number; documentFrequency: number }>;
+}
+
+export interface KwicMatch {
+  documentId: string;
+  documentTitle: string;
+  offset: number;
+  left: string;
+  match: string;
+  right: string;
+}
+export interface KwicResult {
+  term: string;
+  context: number;
+  caseSensitive: boolean;
+  capped: boolean;
+  matches: KwicMatch[];
+}
+
+export interface CooccurrenceResult {
+  scope: "quotation" | "document";
+  codes: Array<{ id: string; name: string; color: string; count: number }>;
+  matrix: Array<{ a: string; b: string; count: number }>;
+}
+
+// =====================================================
+// F14 — Document groups + attribute schema
+// =====================================================
+export interface DocumentGroup {
+  id: string;
+  project_id: string;
+  user_id: string;
+  name: string;
+  description: string | null;
+  color: string;
+  smart_filter: unknown | null;
+  created_at: string;
+  updated_at: string;
+}
+export interface DocumentGroupMember {
+  document_group_id: string;
+  document_id: string;
+  added_at: string;
+}
+export type AttributeDataType = "text" | "number" | "date" | "choice";
+export interface DocumentAttributeSchema {
+  id: string;
+  project_id: string;
+  user_id: string;
+  name: string;
+  data_type: AttributeDataType;
+  options: string[] | null;
+  description: string | null;
+  position: number;
+  created_at: string;
+  updated_at: string;
+}
+
+// =====================================================
+// F15 — Survey importer (frontend mapping config)
+// =====================================================
+export interface SurveyImportMapping {
+  idColumn?: string;
+  contentColumns: string[];
+  attributeColumns: string[];
+  groupName?: string;
+  skipEmpty?: boolean;
 }

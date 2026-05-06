@@ -4,7 +4,12 @@ import type {
   CodebookSuggestionPayload,
   ChatMessage,
   CodeNetworkResponse,
+  CooccurrenceResult,
+  ExportFormat,
+  FrequencyResult,
+  KwicResult,
   QueryNode,
+  SurveyImportMapping,
   ThemeSuggestionPayload,
 } from "@/types/database";
 
@@ -157,7 +162,7 @@ export const api = {
     }>("accept-invitation", args);
   },
 
-  exportProject(args: { projectId: string; format: "csv" | "markdown" | "qdaxml" }) {
+  exportProject(args: { projectId: string; format: ExportFormat }) {
     return invoke<{
       ok: true;
       jobId: string;
@@ -199,6 +204,8 @@ export const api = {
       global: {
         alpha: number | null;
         simpleAgreement: number | null;
+        scottPi: number | null;
+        holsti: number | null;
         kappa: number | null;
         n: number;
         bucketsPerDocument: number;
@@ -211,7 +218,69 @@ export const api = {
     }>("compute-agreement", args);
   },
 
+  textFrequency(args: { projectId: string; topN?: number; documentIds?: string[] }) {
+    return invoke<FrequencyResult>("analyze-text", { ...args, mode: "frequency" });
+  },
+
+  textKwic(args: {
+    projectId: string;
+    term: string;
+    context?: number;
+    caseSensitive?: boolean;
+    documentIds?: string[];
+  }) {
+    return invoke<KwicResult>("analyze-text", { ...args, mode: "kwic" });
+  },
+
+  textCooccurrence(args: {
+    projectId: string;
+    scope?: "quotation" | "document";
+    documentIds?: string[];
+  }) {
+    return invoke<CooccurrenceResult>("analyze-text", { ...args, mode: "cooccurrence" });
+  },
+
 };
+
+// Survey CSV import — multipart/form-data, like importProject.
+export async function importSurvey(args: {
+  file: File;
+  projectId?: string;
+  newProjectName?: string;
+  mapping: SurveyImportMapping;
+}): Promise<{
+  projectId: string;
+  documentsCreated: number;
+  rowsProcessed: number;
+  groupId: string | null;
+}> {
+  const session = await supabase.auth.getSession();
+  const token = session.data.session?.access_token;
+  if (!token) throw new Error("No autenticado");
+
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+  const form = new FormData();
+  form.append("file", args.file);
+  form.append("mapping", JSON.stringify(args.mapping));
+  if (args.projectId) {
+    form.append("project", args.projectId);
+  } else if (args.newProjectName) {
+    form.append("newProject", "true");
+    form.append("newProjectName", args.newProjectName);
+  } else {
+    throw new Error("Either projectId or newProjectName is required");
+  }
+
+  const resp = await fetch(`${supabaseUrl}/functions/v1/import-survey`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+
+  const data = await resp.json();
+  if (!resp.ok) throw new Error((data as { error?: string }).error ?? "Survey import failed");
+  return data;
+}
 
 // Import uses multipart/form-data — can't use the generic invoke() helper.
 export async function importProject(file: File): Promise<{

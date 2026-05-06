@@ -6,6 +6,8 @@ import { CodeBadge } from "@/components/codes/CodeBadge";
 import { useDeleteQuotation, useToggleCoding, type QuotationWithCodes } from "@/hooks/useQuotations";
 import { useToast } from "@/hooks/use-toast";
 import { sentimentColor, sentimentLabelEs } from "@/hooks/useSentiment";
+import { canWrite, useMyRole } from "@/hooks/useMembers";
+import { QuotationLinks } from "@/components/quotations/QuotationLinks";
 import type { QuotationSentiment } from "@/types/database";
 
 interface Props {
@@ -19,6 +21,8 @@ export function QuotationCard({ quotation, projectId, showDocumentLink = true, s
   const deleteQ = useDeleteQuotation();
   const toggleCoding = useToggleCoding();
   const { toast } = useToast();
+  const { data: myRole } = useMyRole(projectId);
+  const writable = canWrite(myRole);
 
   async function handleDelete() {
     if (!confirm("¿Eliminar esta cita?")) return;
@@ -105,6 +109,8 @@ export function QuotationCard({ quotation, projectId, showDocumentLink = true, s
               </span>
             )}
           </div>
+
+          <QuotationLinks projectId={projectId} quotationId={quotation.id} canWrite={writable} />
 
           <div className="mt-3 flex items-center justify-between gap-2 text-xs text-muted-foreground">
             {showDocumentLink && quotation.document_title && (

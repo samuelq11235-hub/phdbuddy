@@ -12,8 +12,9 @@ import { getServiceClient, getUserFromRequest } from "../_shared/supabase.ts";
 import { buildCsv, type CsvRow } from "../_shared/exporters/csv.ts";
 import { buildMarkdown, type MarkdownExportInput } from "../_shared/exporters/markdown.ts";
 import { buildQdpx, type QdaXmlInput } from "../_shared/exporters/qdaxml.ts";
+import { buildHtml, type HtmlExportInput } from "../_shared/exporters/html.ts";
 
-type ExportFormat = "csv" | "markdown" | "qdaxml";
+type ExportFormat = "csv" | "markdown" | "qdaxml" | "html";
 
 interface RequestBody {
   projectId: string;
@@ -43,8 +44,8 @@ Deno.serve(async (req) => {
 
   const { projectId, format } = body;
   if (!projectId) return errorResponse("Missing projectId", 400);
-  if (!["csv", "markdown", "qdaxml"].includes(format)) {
-    return errorResponse("Invalid format. Use: csv | markdown | qdaxml", 400);
+  if (!["csv", "markdown", "qdaxml", "html"].includes(format)) {
+    return errorResponse("Invalid format. Use: csv | markdown | qdaxml | html", 400);
   }
 
   const supabase = getServiceClient();
@@ -165,8 +166,8 @@ Deno.serve(async (req) => {
       contentType = "text/csv";
       extension = "csv";
 
-    } else if (format === "markdown") {
-      const input: MarkdownExportInput = {
+    } else if (format === "markdown" || format === "html") {
+      const baseInput: MarkdownExportInput & HtmlExportInput = {
         project,
         codes: codeList,
         codeGroups: codeGroups ?? [],
@@ -181,9 +182,15 @@ Deno.serve(async (req) => {
         })),
         memos: memoList,
       };
-      fileBytes = buildMarkdown(input);
-      contentType = "text/markdown";
-      extension = "md";
+      if (format === "html") {
+        fileBytes = buildHtml(baseInput);
+        contentType = "text/html";
+        extension = "html";
+      } else {
+        fileBytes = buildMarkdown(baseInput);
+        contentType = "text/markdown";
+        extension = "md";
+      }
 
     } else {
       // qdaxml
