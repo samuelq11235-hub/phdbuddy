@@ -16,15 +16,20 @@ import {
   type Node,
   type NodeTypes,
   type EdgeMouseHandler,
+  type NodeMouseHandler,
   type OnConnect,
   type NodeChange,
 } from "reactflow";
 import dagre from "dagre";
 import "reactflow/dist/style.css";
+import { useNavigate } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { useCodes } from "@/hooks/useCodes";
+import { useQuotations } from "@/hooks/useQuotations";
+import { useMemos } from "@/hooks/useMemos";
+import { useDocuments } from "@/hooks/useDocuments";
 import {
   useCreateLink,
   useLinks,
@@ -36,58 +41,72 @@ import { api } from "@/lib/api";
 import type {
   Code,
   Link,
+  LinkEntityType,
   Network,
   NetworkLayout,
   RelationType,
 } from "@/types/database";
 import { Layers3, Sparkles, Wand2 } from "lucide-react";
 
-import { AddCodesDialog } from "./AddCodesDialog";
+import { AddNodesDialog } from "./AddNodesDialog";
 import { CodeNode, type CodeNodeData } from "./CodeNode";
+import { QuotationNode, type QuotationNodeData } from "./QuotationNode";
+import { MemoNode, type MemoNodeData } from "./MemoNode";
+import { DocumentNode, type DocumentNodeData } from "./DocumentNode";
 import { EdgeEditDialog } from "./EdgeEditDialog";
 import { NewRelationTypeDialog } from "./NewRelationTypeDialog";
 
-const NODE_TYPES: NodeTypes = { code: CodeNode };
+const NODE_TYPES: NodeTypes = {
+  code: CodeNode,
+  quotation: QuotationNode,
+  memo: MemoNode,
+  document: DocumentNode,
+};
+
+// Each node type has a different intrinsic size — dagre needs to know
+// roughly the bounding box to lay things out without overlap.
+const NODE_DIM: Record<LinkEntityType, { w: number; h: number }> = {
+  code: { w: 180, h: 56 },
+  quotation: { w: 240, h: 88 },
+  memo: { w: 200, h: 72 },
+  document: { w: 190, h: 60 },
+};
 
 // =====================================================
 // Helpers — node key, layout, ID translation
 // =====================================================
 
-// React Flow needs string IDs that are stable across the lifetime of a
-// node. We use "<entity_type>:<entity_id>" so the same code can live in
-// multiple networks at different positions, without ever colliding with
-// quotation/memo nodes (future work, but the schema already supports it).
-function makeNodeKey(type: "code" | "quotation" | "memo" | "document", id: string) {
+function makeNodeKey(type: LinkEntityType, id: string) {
   return `${type}:${id}`;
 }
 
-function parseNodeKey(key: string): { type: "code" | "quotation" | "memo" | "document"; id: string } | null {
-  const [type, id] = key.split(":");
-  if (!type || !id) return null;
-  if (type !== "code" && type !== "quotation" && type !== "memo" && type !== "document") return null;
-  return { type, id };
+function parseNodeKey(key: string): { type: LinkEntityType; id: string } | null {
+  const i = key.indexOf(":");
+  if (i < 0) return null;
+  const type = key.slice(0, i);
+  const id = key.slice(i + 1);
+  if (!id) return null;
+  if (type !== "code" && type !== "quotation" && type !== "memo" && type !== "document") {
+    return null;
+  }
+  return { type: type as LinkEntityType, id };
 }
 
-// dagre auto-layout — we only call it when the user clicks "Auto-layout",
-// or for nodes that don't yet have a saved position. The graph direction
-// (LR / TB) is configurable via the toolbar.
-function dagreLayout(
-  nodes: Node<CodeNodeData>[],
-  edges: Edge[],
-  direction: "LR" | "TB"
-): Node<CodeNodeData>[] {
+// dagre auto-layout with per-type bounding boxes.
+function dagreLayout(nodes: Node[], edges: Edge[], direction: "LR" | "TB"): Node[] {
   const g = new dagre.graphlib.Graph();
   g.setGraph({
     rankdir: direction,
-    nodesep: 70,
-    ranksep: 120,
+    nodesep: 80,
+    ranksep: 140,
     marginx: 40,
     marginy: 40,
   });
   g.setDefaultEdgeLabel(() => ({}));
 
   for (const n of nodes) {
-    g.setNode(n.id, { width: 180, height: 56 });
+    const dim = NODE_DIM[(n.type ?? "code") as LinkEntityType] ?? NODE_DIM.code;
+    g.setNode(n.id, { width: dim.w, height: dim.h });
   }
   for (const e of edges) {
     g.setEdge(e.source, e.target);
@@ -97,10 +116,10 @@ function dagreLayout(
   return nodes.map((n) => {
     const pos = g.node(n.id);
     if (!pos) return n;
+    const dim = NODE_DIM[(n.type ?? "code") as LinkEntityType] ?? NODE_DIM.code;
     return {
       ...n,
-      // dagre returns the centre; React Flow expects the top-left.
-      position: { x: pos.x - 90, y: pos.y - 28 },
+      position: { x: pos.x - dim.w / 2, y: pos.y - dim.h / 2 },
     };
   });
 }
@@ -129,6 +148,9 @@ export function NetworkEditorContainer({
 
 function NetworkEditor({ network, projectId }: { network: Network; projectId: string }) {
   const { data: codes = [] } = useCodes(projectId);
+  const { data: quotations = [] } = useQuotations(projectId);
+  const { data: memos = [] } = useMemos(projectId);
+  const { data: documents = [] } = useDocuments(projectId);
   const { data: liveNetwork } = useNetwork(network.id);
   const { data: relationTypes = [] } = useRelationTypes(projectId);
   const { data: links = [] } = useLinks(network.id);
@@ -136,8 +158,15 @@ function NetworkEditor({ network, projectId }: { network: Network; projectId: st
   const updateLayout = useUpdateNetworkLayout();
   const createLink = useCreateLink();
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   const codeById = useMemo(() => new Map(codes.map((c) => [c.id, c])), [codes]);
+  const quotationById = useMemo(
+    () => new Map(quotations.map((q) => [q.id, q])),
+    [quotations]
+  );
+  const memoById = useMemo(() => new Map(memos.map((m) => [m.id, m])), [memos]);
+  const documentById = useMemo(() => new Map(documents.map((d) => [d.id, d])), [documents]);
   const relationTypeById = useMemo(
     () => new Map(relationTypes.map((rt) => [rt.id, rt])),
     [relationTypes]
@@ -148,15 +177,15 @@ function NetworkEditor({ network, projectId }: { network: Network; projectId: st
   // React Flow state — derived from links/codes but kept
   // local so dragging is responsive without re-rendering.
   // -----------------------------------------------------
-  const [nodes, setNodes, onNodesChange] = useNodesState<CodeNodeData>([]);
+  const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [editingLink, setEditingLink] = useState<Link | null>(null);
   const [showCreateRelationType, setShowCreateRelationType] = useState(false);
 
-  // Track which entities are present in this network. A code is "in the
-  // network" iff (a) it has at least one link, OR (b) it has a saved
-  // position in the layout. This means an isolated code can be added by
-  // the user via "Añadir códigos" and persists immediately on first move.
+  // Track which entities are present in this network. An entity is "in
+  // the network" iff (a) it has at least one link, OR (b) it has a
+  // saved position in the layout. This means an isolated node added
+  // via "Añadir nodos" persists immediately on first move.
   const presentNodeKeys = useMemo(() => {
     const keys = new Set<string>();
     for (const k of Object.keys(effectiveLayout)) keys.add(k);
@@ -171,38 +200,67 @@ function NetworkEditor({ network, projectId }: { network: Network; projectId: st
   // Sync DB → React Flow state when data changes
   // -----------------------------------------------------
   useEffect(() => {
-    const built: Node<CodeNodeData>[] = [];
+    const built: Node[] = [];
 
     let i = 0;
     for (const key of presentNodeKeys) {
       const parsed = parseNodeKey(key);
       if (!parsed) continue;
-      if (parsed.type !== "code") continue; // only codes for now (F4 scope)
-      const code = codeById.get(parsed.id);
-      if (!code) continue;
 
+      // Stagger fallback positions on a grid so dagre has something
+      // reasonable to start from when the user clicks Auto-layout.
+      const fallbackX = 200 + (i % 5) * 260;
+      const fallbackY = 80 + Math.floor(i / 5) * 160;
       const saved = effectiveLayout[key];
-      // For nodes without a saved position we lay them out lightly along
-      // a circle so dagre has something reasonable to start from when the
-      // user clicks Auto-layout. Pure (0,0) would stack them all.
-      const fallbackX = 200 + (i % 6) * 220;
-      const fallbackY = 80 + Math.floor(i / 6) * 140;
+      const position = saved ?? { x: fallbackX, y: fallbackY };
       i++;
 
-      built.push({
-        id: key,
-        type: "code",
-        position: saved ?? { x: fallbackX, y: fallbackY },
-        data: {
+      if (parsed.type === "code") {
+        const code = codeById.get(parsed.id);
+        if (!code) continue;
+        const data: CodeNodeData = {
           label: code.name,
           color: code.color,
           usageCount: code.usage_count,
-        },
-      });
+        };
+        built.push({ id: key, type: "code", position, data });
+      } else if (parsed.type === "quotation") {
+        const quote = quotationById.get(parsed.id);
+        if (!quote) continue;
+        const codeColors = (quote.codes ?? []).map((c) => c.color).filter(Boolean);
+        const data: QuotationNodeData = {
+          preview: (quote.content ?? "").slice(0, 140),
+          documentTitle: quote.document_title ?? "(sin título)",
+          codeColors,
+        };
+        built.push({ id: key, type: "quotation", position, data });
+      } else if (parsed.type === "memo") {
+        const memo = memoById.get(parsed.id);
+        if (!memo) continue;
+        // Strip rich-text HTML for the preview line.
+        const plain = memo.content
+          ? memo.content.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
+          : "";
+        const data: MemoNodeData = {
+          title: memo.title,
+          preview: plain.slice(0, 100),
+          kind: memo.kind,
+        };
+        built.push({ id: key, type: "memo", position, data });
+      } else if (parsed.type === "document") {
+        const doc = documentById.get(parsed.id);
+        if (!doc) continue;
+        const data: DocumentNodeData = {
+          title: doc.title,
+          kind: doc.kind,
+          quotationCount: doc.quotation_count,
+        };
+        built.push({ id: key, type: "document", position, data });
+      }
     }
 
     setNodes(built);
-  }, [presentNodeKeys, codeById, effectiveLayout, setNodes]);
+  }, [presentNodeKeys, codeById, quotationById, memoById, documentById, effectiveLayout, setNodes]);
 
   useEffect(() => {
     const built: Edge[] = links.map((link) => {
@@ -236,7 +294,7 @@ function NetworkEditor({ network, projectId }: { network: Network; projectId: st
   const debounceRef = useRef<number | null>(null);
 
   const persistLayout = useCallback(
-    (next: Node<CodeNodeData>[]) => {
+    (next: Node[]) => {
       if (debounceRef.current) window.clearTimeout(debounceRef.current);
       debounceRef.current = window.setTimeout(() => {
         const layout: NetworkLayout = {};
@@ -263,13 +321,10 @@ function NetworkEditor({ network, projectId }: { network: Network; projectId: st
   const handleNodesChange = useCallback(
     (changes: NodeChange[]) => {
       onNodesChange(changes);
-      // We only care about drag-end to persist (dragging emits many
-      // intermediate position changes — flushing each would hammer the DB).
       const settled = changes.some(
         (c) => c.type === "position" && (c as { dragging?: boolean }).dragging === false
       );
       if (settled) {
-        // Pull the freshest node positions from React Flow's local state.
         setNodes((current) => {
           persistLayout(current);
           return current;
@@ -293,7 +348,6 @@ function NetworkEditor({ network, projectId }: { network: Network; projectId: st
       const tgt = parseNodeKey(params.target);
       if (!src || !tgt) return;
 
-      // Optimistic edge so the line shows up before the round-trip.
       setEdges((eds) =>
         addEdge(
           {
@@ -313,8 +367,6 @@ function NetworkEditor({ network, projectId }: { network: Network; projectId: st
           targetType: tgt.type,
           targetId: tgt.id,
         });
-        // Open the edit dialog right away so the user can pick a relation
-        // type — Atlas.ti does the same UX flow.
         setEditingLink(link);
       } catch (err) {
         toast({
@@ -332,43 +384,123 @@ function NetworkEditor({ network, projectId }: { network: Network; projectId: st
     if (link) setEditingLink(link);
   }, []);
 
+  // Double-click on a node opens the actual entity in another tab/route.
+  // Atlas.ti's network editor uses the same idiom.
+  const onNodeDoubleClick: NodeMouseHandler = useCallback(
+    (_evt, node) => {
+      const parsed = parseNodeKey(node.id);
+      if (!parsed) return;
+      if (parsed.type === "document") {
+        navigate(`/projects/${projectId}/documents/${parsed.id}`);
+      } else if (parsed.type === "quotation") {
+        const quote = quotationById.get(parsed.id);
+        if (quote?.document_id) {
+          navigate(
+            `/projects/${projectId}/documents/${quote.document_id}?quotation=${quote.id}`
+          );
+        }
+      }
+      // For codes and memos we leave the dblclick as a no-op — the side
+      // panels in the workspace already host their detail UIs.
+    },
+    [navigate, projectId, quotationById]
+  );
+
   // -----------------------------------------------------
   // Toolbar actions
   // -----------------------------------------------------
-  const handleAddCodes = useCallback(
-    (codeIds: string[]) => {
-      // Append at staggered positions just below the current bbox so new
-      // nodes don't pile on existing ones.
+  const handleAddNodes = useCallback(
+    (selection: { type: LinkEntityType; id: string }[]) => {
       let baseY = 80;
       let baseX = 80;
       if (nodes.length > 0) {
         const maxY = Math.max(...nodes.map((n) => n.position.y));
-        baseY = maxY + 140;
+        baseY = maxY + 160;
         baseX = 80;
       }
 
-      const next: Node<CodeNodeData>[] = [...nodes];
+      const next: Node[] = [...nodes];
       const newLayoutPatch: NetworkLayout = {};
-      for (let i = 0; i < codeIds.length; i++) {
-        const code = codeById.get(codeIds[i]);
-        if (!code) continue;
-        const key = makeNodeKey("code", code.id);
+      for (let i = 0; i < selection.length; i++) {
+        const sel = selection[i];
+        const key = makeNodeKey(sel.type, sel.id);
         if (next.some((n) => n.id === key)) continue;
-        const pos = { x: baseX + (i % 6) * 220, y: baseY + Math.floor(i / 6) * 140 };
-        next.push({
-          id: key,
-          type: "code",
-          position: pos,
-          data: { label: code.name, color: code.color, usageCount: code.usage_count },
-        });
+        const pos = { x: baseX + (i % 5) * 260, y: baseY + Math.floor(i / 5) * 160 };
+
+        if (sel.type === "code") {
+          const code = codeById.get(sel.id);
+          if (!code) continue;
+          next.push({
+            id: key,
+            type: "code",
+            position: pos,
+            data: {
+              label: code.name,
+              color: code.color,
+              usageCount: code.usage_count,
+            } satisfies CodeNodeData,
+          });
+        } else if (sel.type === "quotation") {
+          const quote = quotationById.get(sel.id);
+          if (!quote) continue;
+          const codeColors = (quote.codes ?? []).map((c) => c.color).filter(Boolean);
+          next.push({
+            id: key,
+            type: "quotation",
+            position: pos,
+            data: {
+              preview: (quote.content ?? "").slice(0, 140),
+              documentTitle: quote.document_title ?? "(sin título)",
+              codeColors,
+            } satisfies QuotationNodeData,
+          });
+        } else if (sel.type === "memo") {
+          const memo = memoById.get(sel.id);
+          if (!memo) continue;
+          const plain = memo.content
+            ? memo.content.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
+            : "";
+          next.push({
+            id: key,
+            type: "memo",
+            position: pos,
+            data: {
+              title: memo.title,
+              preview: plain.slice(0, 100),
+              kind: memo.kind,
+            } satisfies MemoNodeData,
+          });
+        } else if (sel.type === "document") {
+          const doc = documentById.get(sel.id);
+          if (!doc) continue;
+          next.push({
+            id: key,
+            type: "document",
+            position: pos,
+            data: {
+              title: doc.title,
+              kind: doc.kind,
+              quotationCount: doc.quotation_count,
+            } satisfies DocumentNodeData,
+          });
+        }
         newLayoutPatch[key] = pos;
       }
       setNodes(next);
-      // Persist immediately so a refresh keeps the new nodes.
       const layout: NetworkLayout = { ...effectiveLayout, ...newLayoutPatch };
       updateLayout.mutate({ networkId: network.id, layout });
     },
-    [codeById, effectiveLayout, network.id, nodes, setNodes, updateLayout]
+    [
+      codeById,
+      documentById,
+      effectiveLayout,
+      memoById,
+      network.id,
+      nodes,
+      quotationById,
+      setNodes,
+      updateLayout,
+    ]
   );
 
   const handleAutoLayout = useCallback(
@@ -402,8 +534,6 @@ function NetworkEditor({ network, projectId }: { network: Network; projectId: st
         return;
       }
 
-      // Auto-apply each suggested relation as a real link. Users can
-      // delete the ones they don't like from the canvas afterwards.
       let applied = 0;
       for (const rel of res.relations) {
         const rt = relationTypes.find(
@@ -422,7 +552,7 @@ function NetworkEditor({ network, projectId }: { network: Network; projectId: st
           });
           applied++;
         } catch {
-          /* ignore individual failures, keep going */
+          /* keep going on individual failures */
         }
       }
       toast({
@@ -440,22 +570,22 @@ function NetworkEditor({ network, projectId }: { network: Network; projectId: st
     }
   }, [createLink, network.id, nodes, projectId, relationTypes, toast]);
 
-  const codesAlreadyAdded = useMemo(() => {
+  const alreadyAddedKeys = useMemo(() => {
     const set = new Set<string>();
-    for (const n of nodes) {
-      const parsed = parseNodeKey(n.id);
-      if (parsed?.type === "code") set.add(parsed.id);
-    }
+    for (const n of nodes) set.add(n.id);
     return set;
   }, [nodes]);
 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
-        <AddCodesDialog
+        <AddNodesDialog
           codes={codes}
-          alreadyAdded={codesAlreadyAdded}
-          onConfirm={handleAddCodes}
+          quotations={quotations}
+          memos={memos}
+          documents={documents}
+          alreadyAdded={alreadyAddedKeys}
+          onConfirm={handleAddNodes}
         />
         <Button variant="outline" size="sm" onClick={() => handleAutoLayout("LR")}>
           <Layers3 className="mr-1 h-4 w-4" />
@@ -484,10 +614,7 @@ function NetworkEditor({ network, projectId }: { network: Network; projectId: st
         </Button>
       </div>
 
-      <div
-        className="rounded-xl border bg-card"
-        style={{ height: 600 }}
-      >
+      <div className="rounded-xl border bg-card" style={{ height: 600 }}>
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -495,6 +622,7 @@ function NetworkEditor({ network, projectId }: { network: Network; projectId: st
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           onEdgeClick={onEdgeClick}
+          onNodeDoubleClick={onNodeDoubleClick}
           nodeTypes={NODE_TYPES}
           connectionMode={ConnectionMode.Loose}
           fitView
@@ -509,7 +637,14 @@ function NetworkEditor({ network, projectId }: { network: Network; projectId: st
             pannable
             zoomable
             nodeStrokeWidth={2}
-            nodeColor={(n) => (n.data as CodeNodeData)?.color ?? "#94A3B8"}
+            nodeColor={(n) => {
+              const t = (n.type ?? "code") as LinkEntityType;
+              if (t === "code") return (n.data as CodeNodeData)?.color ?? "#94A3B8";
+              if (t === "quotation") return "#f59e0b";
+              if (t === "memo") return "#8b5cf6";
+              if (t === "document") return "#0ea5e9";
+              return "#94A3B8";
+            }}
           />
         </ReactFlow>
       </div>
@@ -517,8 +652,9 @@ function NetworkEditor({ network, projectId }: { network: Network; projectId: st
       {nodes.length === 0 ? (
         <div className="rounded-lg border border-dashed bg-muted/20 px-4 py-6 text-center text-sm text-muted-foreground">
           La red está vacía. Pulsa{" "}
-          <span className="font-medium text-foreground">Añadir códigos</span> para empezar a
-          colocar tarjetas en el lienzo y arrastra entre dos códigos para crear relaciones.
+          <span className="font-medium text-foreground">Añadir nodos</span> y combina
+          códigos, citas, memos y documentos. Doble click sobre un nodo abre la
+          entidad original.
         </div>
       ) : null}
 
@@ -538,6 +674,4 @@ function NetworkEditor({ network, projectId }: { network: Network; projectId: st
   );
 }
 
-// Suppress an unused-import warning for the `Code` re-export — kept here
-// so future PRs that add quotation/memo nodes don't have to re-import it.
 export type { Code };

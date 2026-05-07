@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Download, FileText, Table2, Loader2, FileArchive, FileCode2 } from "lucide-react";
+import { Download, FileText, Table2, Loader2, FileArchive, FileCode2, FileType2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -43,6 +43,13 @@ const FORMATS: Format[] = [
     description: "Informe navegable con índice; imprime a PDF desde el navegador",
     icon: FileCode2,
     ext: "html",
+  },
+  {
+    id: "docx",
+    label: "Word (.doc)",
+    description: "Informe Word-compatible — abre directo en Word, Pages, LibreOffice",
+    icon: FileType2,
+    ext: "doc",
   },
   {
     id: "qdaxml",

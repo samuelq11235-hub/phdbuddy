@@ -1,4 +1,4 @@
-import { Plus, FileText } from "lucide-react";
+import { Plus, FileText, BookMarked } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -6,6 +6,7 @@ import { useDocuments } from "@/hooks/useDocuments";
 import { canWrite, useMyRole } from "@/hooks/useMembers";
 import { DocumentItem } from "./DocumentItem";
 import { AddDocumentDialog } from "./AddDocumentDialog";
+import { ImportBibtexDialog } from "@/components/projects/ImportBibtexDialog";
 
 export function DocumentsPanel({ projectId }: { projectId: string }) {
   const { data, isLoading } = useDocuments(projectId);
@@ -22,15 +23,26 @@ export function DocumentsPanel({ projectId }: { projectId: string }) {
           </p>
         </div>
         {writable && (
-          <AddDocumentDialog
-            projectId={projectId}
-            trigger={
-              <Button>
-                <Plus className="mr-2 h-4 w-4" />
-                Añadir documento
-              </Button>
-            }
-          />
+          <div className="flex items-center gap-2">
+            <ImportBibtexDialog
+              projectId={projectId}
+              trigger={
+                <Button variant="outline">
+                  <BookMarked className="mr-2 h-4 w-4" />
+                  Importar BibTeX
+                </Button>
+              }
+            />
+            <AddDocumentDialog
+              projectId={projectId}
+              trigger={
+                <Button>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Añadir documento
+                </Button>
+              }
+            />
+          </div>
         )}
       </div>
 

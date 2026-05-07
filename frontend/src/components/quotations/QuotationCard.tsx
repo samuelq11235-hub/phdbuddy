@@ -8,6 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { sentimentColor, sentimentLabelEs } from "@/hooks/useSentiment";
 import { canWrite, useMyRole } from "@/hooks/useMembers";
 import { QuotationLinks } from "@/components/quotations/QuotationLinks";
+import { CommentsThread } from "@/components/comments/CommentsThread";
 import type { QuotationSentiment } from "@/types/database";
 
 interface Props {
@@ -111,6 +112,19 @@ export function QuotationCard({ quotation, projectId, showDocumentLink = true, s
           </div>
 
           <QuotationLinks projectId={projectId} quotationId={quotation.id} canWrite={writable} />
+
+          <details className="mt-3 rounded-lg border bg-muted/20">
+            <summary className="cursor-pointer select-none px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">
+              Discusión
+            </summary>
+            <div className="px-3 pb-3 pt-2">
+              <CommentsThread
+                projectId={projectId}
+                entityType="quotation"
+                entityId={quotation.id}
+              />
+            </div>
+          </details>
 
           <div className="mt-3 flex items-center justify-between gap-2 text-xs text-muted-foreground">
             {showDocumentLink && quotation.document_title && (

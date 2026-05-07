@@ -10,6 +10,8 @@ import {
   Layers,
   X,
   CheckSquare,
+  Wand2,
+  GitMerge,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -34,6 +36,8 @@ import type { Code, CodeGroup } from "@/types/database";
 import { NewCodeDialog } from "./NewCodeDialog";
 import { NewCodeGroupDialog } from "./NewCodeGroupDialog";
 import { AssignToGroupDialog } from "./AssignToGroupDialog";
+import { SmartCodeDrawer } from "./SmartCodeDrawer";
+import { MergeCodesDialog } from "./MergeCodesDialog";
 
 type ViewMode = "tree" | "groups";
 
@@ -157,6 +161,19 @@ export function CodebookPanel({ projectId }: { projectId: string }) {
             {selectedIds.length} {selectedIds.length === 1 ? "código seleccionado" : "códigos seleccionados"}
           </p>
           <div className="flex items-center gap-2">
+            {selectedIds.length >= 2 && (
+              <MergeCodesDialog
+                projectId={projectId}
+                selectedIds={selectedIds}
+                onMerged={clearSelection}
+                trigger={
+                  <Button variant="outline" size="sm">
+                    <GitMerge className="mr-1 h-3.5 w-3.5" />
+                    Fusionar
+                  </Button>
+                }
+              />
+            )}
             <AssignToGroupDialog
               projectId={projectId}
               codeIds={selectedIds}
@@ -311,6 +328,7 @@ function CodeRow({
 }) {
   const [open, setOpen] = useState(true);
   const [editing, setEditing] = useState(false);
+  const [smartOpen, setSmartOpen] = useState(false);
   const [draftName, setDraftName] = useState(node.name);
   const [draftDesc, setDraftDesc] = useState(node.description ?? "");
 
@@ -416,6 +434,18 @@ function CodeRow({
                 {node.created_by_ai && (
                   <Sparkles className="h-3 w-3 text-primary" aria-label="Generado por IA" />
                 )}
+                {node.smart_query_id && (
+                  <button
+                    type="button"
+                    onClick={() => setSmartOpen(true)}
+                    className="inline-flex items-center gap-1 rounded-full bg-cyan-50 px-2 py-0.5 text-[10px] font-medium text-cyan-700 ring-1 ring-cyan-200 transition-colors hover:bg-cyan-100 dark:bg-cyan-950/40 dark:text-cyan-300 dark:ring-cyan-800"
+                    aria-label="Ver citas resueltas en vivo"
+                    title="Smart code — abrir resultados resueltos en vivo"
+                  >
+                    <Wand2 className="h-3 w-3" />
+                    Smart
+                  </button>
+                )}
                 <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
                   {node.usage_count} {node.usage_count === 1 ? "uso" : "usos"}
                 </span>
@@ -486,6 +516,21 @@ function CodeRow({
             />
           ))}
         </ul>
+      )}
+
+      {node.smart_query_id && (
+        <SmartCodeDrawer
+          code={{
+            id: node.id,
+            name: node.name,
+            color: node.color,
+            description: node.description ?? null,
+            smart_query_id: node.smart_query_id,
+          }}
+          projectId={projectId}
+          open={smartOpen}
+          onOpenChange={setSmartOpen}
+        />
       )}
     </li>
   );

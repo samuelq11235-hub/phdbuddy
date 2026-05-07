@@ -240,6 +240,30 @@ export const api = {
     return invoke<CooccurrenceResult>("analyze-text", { ...args, mode: "cooccurrence" });
   },
 
+  summarizeDocument(args: { documentId: string; refresh?: boolean }) {
+    return invoke<{
+      ok: true;
+      cached: boolean;
+      summary: {
+        abstract: string;
+        themes: { name: string; description: string }[];
+        actors?: { name: string; role: string }[];
+        notable_quotes?: { text: string; why_notable: string }[];
+        generated_at: string;
+        model: string;
+      };
+    }>("summarize-document", args);
+  },
+
+  generateNetworkFromAI(args: { projectId: string; networkName?: string; topN?: number }) {
+    return invoke<{
+      ok: true;
+      networkId: string;
+      nodesAdded: number;
+      linksCreated: number;
+    }>("generate-network", args);
+  },
+
 };
 
 // Survey CSV import — multipart/form-data, like importProject.

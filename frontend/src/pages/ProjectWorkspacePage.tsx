@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useSearchParams, Link } from "react-router-dom";
 import {
   FileText,
@@ -36,6 +36,7 @@ import { QueryBuilderPanel } from "@/components/query/QueryBuilderPanel";
 import { TextAnalysisPanel } from "@/components/analysis/TextAnalysisPanel";
 import { DocumentGroupsPanel } from "@/components/documents/DocumentGroupsPanel";
 import { ActivityLogPanel } from "@/components/activity/ActivityLogPanel";
+import { GlobalSearchDialog } from "@/components/search/GlobalSearchDialog";
 
 const VALID_TABS = [
   "documents",
@@ -82,6 +83,23 @@ export default function ProjectWorkspacePage() {
       document.title = "PHDBuddy";
     };
   }, [project]);
+
+  // Cmd/Ctrl+K opens the global search palette. We register the
+  // listener at the workspace scope so it doesn't fight other shortcuts
+  // on landing/auth pages.
+  const [searchOpen, setSearchOpen] = useState(false);
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setSearchOpen((o) => !o);
+      } else if (e.key === "Escape" && searchOpen) {
+        setSearchOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [searchOpen]);
 
   if (isLoading || !project) {
     return (
@@ -136,9 +154,28 @@ export default function ProjectWorkspacePage() {
           <Stat label="códigos" value={project.code_count} icon={Tags} />
           <Stat label="citas" value={project.quotation_count} icon={Quote} />
           <Stat label="memos" value={project.memo_count} icon={NotebookPen} />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setSearchOpen(true)}
+            className="gap-1.5"
+            title="Buscar en el proyecto (Ctrl/Cmd+K)"
+          >
+            <Search className="h-3.5 w-3.5" />
+            Buscar
+            <kbd className="ml-1 hidden rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground sm:inline">
+              ⌘K
+            </kbd>
+          </Button>
           <ExportButton projectId={projectId} />
         </div>
       </header>
+
+      <GlobalSearchDialog
+        projectId={projectId}
+        open={searchOpen}
+        onOpenChange={setSearchOpen}
+      />
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as TabId)}>
         <TabsList className="flex w-full flex-wrap justify-start gap-1 bg-transparent p-0">

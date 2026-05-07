@@ -79,6 +79,24 @@ export type ChatRole = "user" | "assistant" | "system";
 export type LinkEntityType = "code" | "quotation" | "memo" | "document";
 
 // =====================================================
+// F27.2 — Threaded comments on entities
+// =====================================================
+export interface EntityComment {
+  id: string;
+  user_id: string;
+  project_id: string;
+  entity_type: LinkEntityType;
+  entity_id: string;
+  body: string;
+  parent_comment_id: string | null;
+  resolved: boolean;
+  resolved_at: string | null;
+  resolved_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// =====================================================
 // Profiles (kept from original)
 // =====================================================
 export interface Profile {
@@ -549,7 +567,7 @@ export interface DocumentForCodeRow {
 // =====================================================
 // F6 — Exports / Imports
 // =====================================================
-export type ExportFormat = "csv" | "markdown" | "qdaxml" | "html";
+export type ExportFormat = "csv" | "markdown" | "qdaxml" | "html" | "docx";
 export type ExportJobStatus = "pending" | "done" | "error";
 
 export interface ExportJob {

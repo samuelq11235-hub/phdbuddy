@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
-import { Loader2, Network as NetworkIcon, Trash2 } from "lucide-react";
+import { Loader2, Network as NetworkIcon, Sparkles, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { api } from "@/lib/api";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Select,
   SelectContent,
@@ -27,6 +29,30 @@ export function CodeNetworkPanel({ projectId }: { projectId: string }) {
   const { data: networks, isLoading } = useNetworks(projectId);
   const deleteNetwork = useDeleteNetwork();
   const { toast } = useToast();
+  const qc = useQueryClient();
+  const [generating, setGenerating] = useState(false);
+
+  async function handleGenerateAuto() {
+    if (generating) return;
+    setGenerating(true);
+    try {
+      const res = await api.generateNetworkFromAI({ projectId });
+      await qc.invalidateQueries({ queryKey: ["networks", projectId] });
+      setSelectedNetworkId(res.networkId);
+      toast({
+        title: "Red generada",
+        description: `${res.nodesAdded} códigos colocados, ${res.linksCreated} relaciones inferidas por Claude.`,
+      });
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "No se pudo generar la red",
+        description: err instanceof Error ? err.message : undefined,
+      });
+    } finally {
+      setGenerating(false);
+    }
+  }
 
   // Pick the first network on first load / when the selected one disappears.
   useEffect(() => {
@@ -81,7 +107,11 @@ export function CodeNetworkPanel({ projectId }: { projectId: string }) {
           {isLoading ? (
             <Skeleton className="h-[600px] w-full" />
           ) : !networks || networks.length === 0 ? (
-            <EmptyEditorState projectId={projectId} />
+            <EmptyEditorState
+              projectId={projectId}
+              onGenerateAuto={handleGenerateAuto}
+              generating={generating}
+            />
           ) : (
             <>
               <div className="flex flex-wrap items-center gap-2">
@@ -102,6 +132,21 @@ export function CodeNetworkPanel({ projectId }: { projectId: string }) {
                 </Select>
 
                 <NewNetworkDialog projectId={projectId} />
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleGenerateAuto}
+                  disabled={generating}
+                  title="Crea una nueva red con los códigos más usados y deja que Claude proponga las relaciones."
+                >
+                  {generating ? (
+                    <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Sparkles className="mr-1 h-4 w-4" />
+                  )}
+                  {generating ? "Generando…" : "Auto-red (IA)"}
+                </Button>
 
                 {selectedNetwork ? (
                   <Button
@@ -142,7 +187,15 @@ export function CodeNetworkPanel({ projectId }: { projectId: string }) {
   );
 }
 
-function EmptyEditorState({ projectId }: { projectId: string }) {
+function EmptyEditorState({
+  projectId,
+  onGenerateAuto,
+  generating,
+}: {
+  projectId: string;
+  onGenerateAuto: () => void;
+  generating: boolean;
+}) {
   return (
     <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed bg-muted/20 px-6 py-16 text-center">
       <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
@@ -153,10 +206,20 @@ function EmptyEditorState({ projectId }: { projectId: string }) {
         Crea una red para arrastrar códigos al lienzo, dibujar relaciones tipadas (causa,
         parte-de, contradice…) y modelar tu marco interpretativo.
       </p>
-      <NewNetworkDialog
-        projectId={projectId}
-        trigger={<Button className="mt-4">Crear primera red</Button>}
-      />
+      <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+        <NewNetworkDialog
+          projectId={projectId}
+          trigger={<Button>Crear primera red</Button>}
+        />
+        <Button variant="outline" onClick={onGenerateAuto} disabled={generating}>
+          {generating ? (
+            <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+          ) : (
+            <Sparkles className="mr-1 h-4 w-4" />
+          )}
+          Auto-red (IA)
+        </Button>
+      </div>
     </div>
   );
 }

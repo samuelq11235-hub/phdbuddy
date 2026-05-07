@@ -116,6 +116,77 @@ export function useDeleteCode() {
   });
 }
 
+// Merges N source codes into a single target code (server-side via the
+// merge_codes() RPC). All quotation_codes rows on the sources are
+// re-pointed to the target, child codes are reparented, then the source
+// codes are deleted. The target's usage_count is recomputed.
+export function useMergeCodes() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      projectId: string;
+      targetCodeId: string;
+      sourceCodeIds: string[];
+    }) => {
+      const { data, error } = await supabase.rpc("merge_codes", {
+        p_target_code_id: input.targetCodeId,
+        p_source_code_ids: input.sourceCodeIds,
+      });
+      if (error) throw error;
+      const row = (Array.isArray(data) ? data[0] : data) as
+        | { merged_count: number; removed_codes: number }
+        | null;
+      return {
+        mergedCount: row?.merged_count ?? 0,
+        removedCodes: row?.removed_codes ?? 0,
+        projectId: input.projectId,
+      };
+    },
+    onSuccess: ({ projectId }) => {
+      qc.invalidateQueries({ queryKey: ["codes", projectId] });
+      qc.invalidateQueries({ queryKey: ["quotations", projectId] });
+      qc.invalidateQueries({ queryKey: ["code-cooccurrence", projectId] });
+      qc.invalidateQueries({ queryKey: ["code-document-matrix", projectId] });
+    },
+  });
+}
+
+// Splits a code into two by moving a subset of its quotations to a
+// brand-new sibling. The new code inherits the source's parent and
+// color so the codebook tree stays visually coherent.
+export function useSplitCode() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      projectId: string;
+      sourceCodeId: string;
+      quotationIds: string[];
+      newName: string;
+      newDescription?: string;
+    }) => {
+      const { data, error } = await supabase.rpc("split_code", {
+        p_source_code_id: input.sourceCodeId,
+        p_quotation_ids: input.quotationIds,
+        p_new_name: input.newName,
+        p_new_description: input.newDescription ?? null,
+      });
+      if (error) throw error;
+      const row = (Array.isArray(data) ? data[0] : data) as
+        | { new_code_id: string; moved_count: number }
+        | null;
+      return {
+        newCodeId: row?.new_code_id ?? null,
+        movedCount: row?.moved_count ?? 0,
+        projectId: input.projectId,
+      };
+    },
+    onSuccess: ({ projectId }) => {
+      qc.invalidateQueries({ queryKey: ["codes", projectId] });
+      qc.invalidateQueries({ queryKey: ["quotations", projectId] });
+    },
+  });
+}
+
 export function useCodeCooccurrence(projectId: string | undefined) {
   return useQuery({
     queryKey: ["code-cooccurrence", projectId],

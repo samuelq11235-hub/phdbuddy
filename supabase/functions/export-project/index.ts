@@ -13,8 +13,9 @@ import { buildCsv, type CsvRow } from "../_shared/exporters/csv.ts";
 import { buildMarkdown, type MarkdownExportInput } from "../_shared/exporters/markdown.ts";
 import { buildQdpx, type QdaXmlInput } from "../_shared/exporters/qdaxml.ts";
 import { buildHtml, type HtmlExportInput } from "../_shared/exporters/html.ts";
+import { buildDocx } from "../_shared/exporters/docx.ts";
 
-type ExportFormat = "csv" | "markdown" | "qdaxml" | "html";
+type ExportFormat = "csv" | "markdown" | "qdaxml" | "html" | "docx";
 
 interface RequestBody {
   projectId: string;
@@ -44,8 +45,8 @@ Deno.serve(async (req) => {
 
   const { projectId, format } = body;
   if (!projectId) return errorResponse("Missing projectId", 400);
-  if (!["csv", "markdown", "qdaxml", "html"].includes(format)) {
-    return errorResponse("Invalid format. Use: csv | markdown | qdaxml | html", 400);
+  if (!["csv", "markdown", "qdaxml", "html", "docx"].includes(format)) {
+    return errorResponse("Invalid format. Use: csv | markdown | qdaxml | html | docx", 400);
   }
 
   const supabase = getServiceClient();
@@ -166,7 +167,7 @@ Deno.serve(async (req) => {
       contentType = "text/csv";
       extension = "csv";
 
-    } else if (format === "markdown" || format === "html") {
+    } else if (format === "markdown" || format === "html" || format === "docx") {
       const baseInput: MarkdownExportInput & HtmlExportInput = {
         project,
         codes: codeList,
@@ -186,6 +187,14 @@ Deno.serve(async (req) => {
         fileBytes = buildHtml(baseInput);
         contentType = "text/html";
         extension = "html";
+      } else if (format === "docx") {
+        fileBytes = buildDocx(baseInput);
+        // Force Office to claim the file. Older Office builds get
+        // grumpy with application/vnd.openxmlformats-officedocument...
+        // when the payload is HTML, so we use the legacy .doc MIME
+        // which both Office 2007+ and LibreOffice handle cleanly.
+        contentType = "application/msword";
+        extension = "doc";
       } else {
         fileBytes = buildMarkdown(baseInput);
         contentType = "text/markdown";

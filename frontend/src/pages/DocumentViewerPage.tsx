@@ -12,6 +12,7 @@ import { VideoDocumentViewer } from "@/components/documents/VideoDocumentViewer"
 import { PdfDocumentViewer } from "@/components/documents/PdfDocumentViewer";
 import { AddQuotationDialog } from "@/components/quotations/AddQuotationDialog";
 import { AutoCodeButton } from "@/components/ai/AutoCodeButton";
+import { DocumentSummaryButton } from "@/components/documents/DocumentSummaryButton";
 import {
   useDocument,
   useDocumentTranscript,
@@ -120,6 +121,10 @@ export default function DocumentViewerPage() {
               {pdfMode ? "Vista texto" : "Vista PDF"}
             </Button>
           )}
+          <DocumentSummaryButton
+            documentId={documentId}
+            documentReady={document.status === "ready"}
+          />
           <AutoCodeButton
             documentId={documentId}
             documentReady={document.status === "ready"}
