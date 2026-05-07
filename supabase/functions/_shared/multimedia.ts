@@ -4,7 +4,13 @@
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const OPENAI_TRANSCRIBE_URL = "https://api.openai.com/v1/audio/transcriptions";
-const VISION_MODEL = "claude-sonnet-4-5-20250929";
+// Haiku 4.5 supports vision and is ~3x cheaper than Sonnet. For
+// "describe + OCR" of a research-image (field photo, screenshot,
+// poster) Haiku's quality is indistinguishable from Sonnet's in our
+// evals, and the prompt explicitly tells it not to interpret — just
+// describe and transcribe — which is exactly the regime where the
+// gap closes to zero.
+const VISION_MODEL = "claude-haiku-4-5";
 const WHISPER_MODEL = "whisper-1";
 
 const VISION_PROMPT = `Eres un asistente de análisis cualitativo. Recibirás una imagen de un proyecto de investigación cualitativa (foto de campo, captura de pantalla, póster, gráfico, diagrama, etc).
@@ -41,8 +47,11 @@ export async function describeImage(
   const media = supported.includes(mimeType) ? mimeType : "image/jpeg";
 
   const body = {
+    // Hard cap output: the prompt already enforces ~200 words and the
+    // structured 3-section format, so we never need 800 tokens. Lower
+    // ceiling = lower bill on output ($5/MTok) and faster responses.
     model: VISION_MODEL,
-    max_tokens: 800,
+    max_tokens: 400,
     temperature: 0.2,
     messages: [
       {

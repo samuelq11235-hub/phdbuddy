@@ -6,7 +6,7 @@
 import { handlePreflight, jsonResponse, errorResponse } from "../_shared/cors.ts";
 import { getServiceClient, getUserFromRequest } from "../_shared/supabase.ts";
 import { embedQuery } from "../_shared/voyage.ts";
-import { callClaudeTool, CLAUDE_MODEL } from "../_shared/claude.ts";
+import { callClaudeTool, CLAUDE_MODEL, CLAUDE_HAIKU } from "../_shared/claude.ts";
 import {
   SUGGEST_CODES_SYSTEM_PROMPT,
   suggestCodesForQuotePrompt,
@@ -182,12 +182,19 @@ Deno.serve(async (req) => {
         },
       ],
       {
+        // Haiku 4.5 is plenty for "pick best codes for one quote": this
+        // is a shallow classification task with a fixed vocabulary, not
+        // open reasoning. ~3x cheaper input + output than Sonnet.
+        model: CLAUDE_HAIKU,
         system: SUGGEST_CODES_SYSTEM_PROMPT,
         toolName: "suggest_codes",
         toolDescription:
           "Devuelve los códigos del codebook que aplican a esta cita y, si hace falta, 1-2 códigos nuevos.",
         inputSchema: SUGGEST_TOOL_SCHEMA,
-        maxTokens: 2048,
+        // The tool schema caps results at ~4 codes total; each code is
+        // ~30 tokens. 768 leaves headroom for verbose rationales without
+        // burning output budget on edge cases.
+        maxTokens: 768,
         temperature: 0.2,
         // System + schema are stable across calls in a session; caching
         // brings the input bill down to ~10% on repeated invocations.

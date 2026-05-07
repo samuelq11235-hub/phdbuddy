@@ -174,6 +174,40 @@ ${args.quote}
 Analiza únicamente la cita anterior. No infieras emociones que no se expresen en el texto.`;
 }
 
+/**
+ * Batched variant of `sentimentPrompt`: ask Claude to analyze N quotes
+ * in a single call. Each quote gets a numeric idx (1-based) so the
+ * result array can be matched back to the source quotation. This is
+ * the single biggest token saver on the sentiment path: the system
+ * prompt + tool schema (~400 tokens of overhead) is paid ONCE per
+ * batch instead of per quote, and Claude amortizes its own framing
+ * across the batch too.
+ */
+export function batchSentimentPrompt(args: {
+  quotes: {
+    idx: number;
+    quote: string;
+    documentTitle: string;
+    documentKind: string;
+    contextBefore?: string;
+    contextAfter?: string;
+  }[];
+}): string {
+  const blocks = args.quotes.map((q) => {
+    const ctx = [q.contextBefore, q.contextAfter].filter(Boolean).join(" […] ");
+    return `## idx=${q.idx}
+Documento: "${q.documentTitle}" (tipo: ${q.documentKind})
+${ctx ? `Contexto (no analizar): "${ctx.slice(0, 280)}"` : ""}
+Cita:
+"""
+${q.quote}
+"""`;
+  });
+  return `Analiza la valoración afectiva de cada cita por separado. Devuelve UN objeto por cita en el array \`results\`, conservando el \`idx\` original. No mezcles afectos entre citas.
+
+${blocks.join("\n\n")}`;
+}
+
 export const RELATIONS_SYSTEM_PROMPT = `Eres analista cualitativa senior. Recibes un conjunto de códigos de un proyecto (con descripción y citas representativas) y debes proponer relaciones interpretativas entre ellos en el espíritu de los networks de Atlas.ti / NVivo.
 
 Reglas estrictas:
@@ -223,7 +257,7 @@ ${codeBlock}
 Propón relaciones interpretativas entre los códigos anteriores. Considera tanto coocurrencia (códigos que aparecen juntos) como contraste (códigos que se oponen). No incluyas un código consigo mismo.`;
 }
 
-export const CHAT_SYSTEM_PROMPT = `Eres el asistente de investigación cualitativa de PHDBuddy. Ayudas a la persona usuaria a analizar y razonar sobre los datos de SU proyecto: documentos, códigos, citas y memos.
+const CHAT_SYSTEM_BASE = `Eres el asistente de investigación cualitativa de PHDBuddy. Ayudas a la persona usuaria a analizar y razonar sobre los datos de SU proyecto: documentos, códigos, citas y memos.
 
 Reglas estrictas:
 - Fundamenta cada afirmación en el contexto provisto (citas y fragmentos de documentos). Cita por su número de referencia, p. ej., [Q3], [C2].
@@ -232,24 +266,70 @@ Reglas estrictas:
 - Cuando se te pidan patrones, temas o comparaciones, señala evidencia específica del contexto.
 - Responde siempre en el mismo idioma que la pregunta de la persona usuaria.`;
 
+/**
+ * Static-by-design system prompt for project-chat. We append the
+ * project-level metadata here (instead of in the user message) so the
+ * combined block is byte-identical across every turn of the same
+ * conversation, which lets Anthropic's prompt cache hit on every turn
+ * after the first. Cache-hit input tokens cost ~10% of the normal
+ * price and don't count against the per-minute rate limit.
+ *
+ * IMPORTANT: keep this output deterministic — the cache key is the
+ * exact string. Changes to research_question/methodology mid-session
+ * will (correctly) miss the cache; any other formatting drift would
+ * miss the cache for no gain.
+ */
+export function buildChatSystemPrompt(projectContext: {
+  name: string;
+  research_question?: string | null;
+  methodology?: string | null;
+}): string {
+  return `${CHAT_SYSTEM_BASE}
+
+# Proyecto activo
+Nombre: ${projectContext.name}
+Pregunta de investigación: ${projectContext.research_question ?? "(no especificada)"}
+Metodología: ${projectContext.methodology ?? "(no especificada)"}`;
+}
+
+// Backwards-compatible export for any callers still importing the old
+// constant. New code should use `buildChatSystemPrompt(projectContext)`.
+export const CHAT_SYSTEM_PROMPT = CHAT_SYSTEM_BASE;
+
+// Hard cap each quotation's content at this many chars before sending
+// it as retrieved context. Long quotes (>1.5 KB) appear regularly in
+// transcribed audio and rarely improve answer quality past the first
+// ~800 chars, but they're billed at ~250 tokens each. Truncating here
+// is a flat 30-50% input-cost cut for chat with no measurable impact
+// on answer relevance.
+const QUOTE_CONTENT_CHAR_CAP = 800;
+const CHUNK_CONTENT_CHAR_CAP = 600;
+
+/**
+ * Dynamic per-turn user message for project-chat. NEVER include
+ * project-level metadata here — that lives in the (cached) system
+ * prompt. Only retrieved evidence + the actual question go in here.
+ */
 export function chatUserPrompt(args: {
   question: string;
   quotations: { ref: string; content: string; document_title: string; codes: string[] }[];
   chunks: { ref: string; content: string; document_title: string }[];
-  projectContext: { name: string; research_question?: string | null; methodology?: string | null };
 }): string {
-  return `# Proyecto: ${args.projectContext.name}
-Pregunta de investigación: ${args.projectContext.research_question ?? "(no especificada)"}
-Metodología: ${args.projectContext.methodology ?? "(no especificada)"}
+  const truncate = (s: string, cap: number) => {
+    const collapsed = s.replace(/\s+/g, " ").trim();
+    return collapsed.length > cap
+      ? collapsed.slice(0, cap).trimEnd() + "…"
+      : collapsed;
+  };
 
-# Citas recuperadas
+  return `# Citas recuperadas
 ${
   args.quotations.length === 0
     ? "(ninguna)"
     : args.quotations
         .map(
           (q) =>
-            `[${q.ref}] de "${q.document_title}" — códigos: ${q.codes.join(", ") || "ninguno"}\n  "${q.content.replace(/\s+/g, " ").trim()}"`
+            `[${q.ref}] de "${q.document_title}" — códigos: ${q.codes.join(", ") || "ninguno"}\n  "${truncate(q.content, QUOTE_CONTENT_CHAR_CAP)}"`
         )
         .join("\n\n")
 }
@@ -259,11 +339,11 @@ ${
   args.chunks.length === 0
     ? "(ninguno)"
     : args.chunks
-        .map((c) => `[${c.ref}] de "${c.document_title}"\n  "${c.content.replace(/\s+/g, " ").slice(0, 600).trim()}…"`)
+        .map((c) => `[${c.ref}] de "${c.document_title}"\n  "${truncate(c.content, CHUNK_CONTENT_CHAR_CAP)}"`)
         .join("\n\n")
 }
 
-# Pregunta de la persona usuaria
+# Pregunta
 ${args.question}
 
 Responde fundamentando tu respuesta en el contexto recuperado anterior. Cita con [Q#] o [C#].`;

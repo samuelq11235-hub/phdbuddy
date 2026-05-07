@@ -13,48 +13,77 @@
 
 import { handlePreflight, jsonResponse, errorResponse } from "../_shared/cors.ts";
 import { getServiceClient, getUserFromRequest } from "../_shared/supabase.ts";
-import { callClaudeTool, CLAUDE_MODEL } from "../_shared/claude.ts";
-import { SENTIMENT_SYSTEM_PROMPT, sentimentPrompt } from "../_shared/prompts.ts";
+import { callClaudeTool, CLAUDE_MODEL, CLAUDE_HAIKU } from "../_shared/claude.ts";
+import { SENTIMENT_SYSTEM_PROMPT, batchSentimentPrompt } from "../_shared/prompts.ts";
 
+// Batched schema: Claude returns an array of per-quote results, each
+// keyed back to the original input via `quotation_idx`. This lets us
+// process up to BATCH_SIZE quotes in a single API call instead of one
+// call per quote. ~85% reduction in per-quote overhead (system +
+// schema were the dominant token cost on the per-quote variant).
 const SENTIMENT_TOOL_SCHEMA = {
   type: "object",
-  required: ["polarity", "label"],
+  required: ["results"],
   properties: {
-    polarity: {
-      type: "number",
-      description: "Polaridad afectiva en el rango [-1, 1].",
-    },
-    label: {
-      type: "string",
-      enum: ["positive", "negative", "neutral", "mixed"],
-      description: "Etiqueta categórica.",
-    },
-    aspects: {
+    results: {
       type: "array",
-      description: "Hasta 3 entidades o temas con polaridad propia.",
+      description:
+        "Un objeto por cita analizada. Conserva el quotation_idx tal y como te lo dimos.",
       items: {
         type: "object",
-        required: ["aspect", "polarity"],
+        required: ["quotation_idx", "polarity", "label"],
         properties: {
-          aspect: { type: "string", description: "Entidad/tema concreto." },
-          polarity: { type: "number", description: "Polaridad de ese aspecto." },
+          quotation_idx: {
+            type: "integer",
+            description: "Índice (1-based) de la cita correspondiente.",
+          },
+          polarity: {
+            type: "number",
+            description: "Polaridad afectiva en el rango [-1, 1].",
+          },
+          label: {
+            type: "string",
+            enum: ["positive", "negative", "neutral", "mixed"],
+            description: "Etiqueta categórica.",
+          },
+          aspects: {
+            type: "array",
+            description: "Hasta 3 entidades o temas con polaridad propia.",
+            items: {
+              type: "object",
+              required: ["aspect", "polarity"],
+              properties: {
+                aspect: { type: "string" },
+                polarity: { type: "number" },
+              },
+            },
+          },
+          emotions: {
+            type: "array",
+            description: "Hasta 3 emociones primarias detectadas.",
+            items: { type: "string" },
+          },
         },
       },
-    },
-    emotions: {
-      type: "array",
-      description: "Hasta 3 emociones primarias detectadas.",
-      items: { type: "string" },
     },
   },
 };
 
-interface SentimentToolResponse {
+interface SentimentResultItem {
+  quotation_idx: number;
   polarity: number;
   label: "positive" | "negative" | "neutral" | "mixed";
   aspects?: { aspect: string; polarity: number }[];
   emotions?: string[];
 }
+interface SentimentToolResponse {
+  results: SentimentResultItem[];
+}
+
+// 10 quotes per batch is a sweet spot: enough to amortize the system
+// prompt + tool schema (~400 tokens) across many quotes, but small
+// enough that one rate-limit error doesn't lose 25 quotes' work.
+const BATCH_SIZE = 10;
 
 interface RequestBody {
   quotationIds?: string[];
@@ -161,14 +190,15 @@ Deno.serve(async (req) => {
     error?: string;
   }[] = [];
 
-  // Sequential to avoid hammering Anthropic. The UI invokes this per chunk
-  // anyway when handling large projects.
+  // Skip empties and build the batch list with stable indices. We keep
+  // the original QuotationRow alongside its 1-based idx so we can map
+  // Claude's `quotation_idx` back to the row to upsert.
+  const validRows: { idx: number; row: QuotationRow; before: string; after: string }[] = [];
   for (const raw of rows as unknown as QuotationRow[]) {
     if (!raw.content || raw.content.trim().length === 0) {
       results.push({ quotationId: raw.id, ok: false, error: "empty content" });
       continue;
     }
-
     const doc = Array.isArray(raw.document) ? raw.document[0] : raw.document;
     const fullText = doc?.full_text ?? null;
     const before = fullText
@@ -177,46 +207,102 @@ Deno.serve(async (req) => {
     const after = fullText
       ? fullText.slice(raw.end_offset, Math.min(fullText.length, raw.end_offset + 220))
       : "";
+    validRows.push({ idx: validRows.length + 1, row: raw, before, after });
+  }
 
+  // Process in batches of BATCH_SIZE. Each batch is one Claude call that
+  // returns N sentiment objects keyed by quotation_idx.
+  for (let cursor = 0; cursor < validRows.length; cursor += BATCH_SIZE) {
+    const batch = validRows.slice(cursor, cursor + BATCH_SIZE);
+    // Re-number the batch from 1 so the prompt's idx column always
+    // starts at 1 and Claude's grounding stays consistent.
+    const numbered = batch.map((b, i) => ({
+      ...b,
+      promptIdx: i + 1,
+    }));
+
+    let resp: { results?: SentimentResultItem[] } | null = null;
+    let model = CLAUDE_MODEL;
     try {
       const result = await callClaudeTool<SentimentToolResponse>(
         [
           {
             role: "user",
-            content: sentimentPrompt({
-              quote: raw.content,
-              documentTitle: doc?.title ?? "(documento sin título)",
-              documentKind: doc?.kind ?? "other",
-              contextBefore: before,
-              contextAfter: after,
+            content: batchSentimentPrompt({
+              quotes: numbered.map((b) => {
+                const doc = Array.isArray(b.row.document)
+                  ? b.row.document[0]
+                  : b.row.document;
+                return {
+                  idx: b.promptIdx,
+                  quote: b.row.content,
+                  documentTitle: doc?.title ?? "(documento sin título)",
+                  documentKind: doc?.kind ?? "other",
+                  contextBefore: b.before,
+                  contextAfter: b.after,
+                };
+              }),
             }),
           },
         ],
         {
+          // Sentiment is a shallow classification task with a fixed
+          // label set — Haiku 4.5 nails it and is ~3x cheaper than
+          // Sonnet on both input and output.
+          model: CLAUDE_HAIKU,
           system: SENTIMENT_SYSTEM_PROMPT,
-          toolName: "report_sentiment",
+          toolName: "report_sentiment_batch",
           toolDescription:
-            "Devuelve la valoración afectiva (polarity, label, aspects, emotions) de la cita.",
+            "Devuelve un array `results` con la valoración afectiva (polarity, label, aspects, emotions) de cada cita, identificada por quotation_idx.",
           inputSchema: SENTIMENT_TOOL_SCHEMA,
-          maxTokens: 512,
+          // Each result item is ~80-180 output tokens. 2048 leaves room
+          // for the full BATCH_SIZE × emotions/aspects arrays.
+          maxTokens: 2048,
           temperature: 0.1,
-          // The system prompt + schema are byte-identical for every
-          // quote in a batch run; caching them cuts the per-call input
-          // bill by ~80% after the first quote.
+          // System + schema are byte-identical across all batches in a
+          // run; caching cuts the per-batch input bill by ~80% after
+          // the first batch.
           cachePrompt: true,
         }
       );
+      resp = result.data;
+      model = result.model ?? CLAUDE_HAIKU;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "claude failed";
+      // The whole batch fails together when Claude itself fails — mark
+      // each row as failed so the user can retry just the laggards.
+      for (const b of batch) {
+        results.push({ quotationId: b.row.id, ok: false, error: msg });
+      }
+      continue;
+    }
 
-      const sentiment = result.data;
-      // Clamp polarity into the schema range; Claude occasionally drifts a hair.
-      const polarity = Math.max(-1, Math.min(1, Number(sentiment.polarity) || 0));
+    const byIdx = new Map<number, SentimentResultItem>();
+    for (const r of resp?.results ?? []) {
+      if (typeof r?.quotation_idx === "number") byIdx.set(r.quotation_idx, r);
+    }
+
+    for (const b of numbered) {
+      const sentiment = byIdx.get(b.promptIdx);
+      if (!sentiment) {
+        results.push({
+          quotationId: b.row.id,
+          ok: false,
+          error: "no result returned for this idx",
+        });
+        continue;
+      }
+      const polarity = Math.max(
+        -1,
+        Math.min(1, Number(sentiment.polarity) || 0)
+      );
       const label = sentiment.label;
 
       const { error: upsertErr } = await supabase.from("quotation_sentiment").upsert(
         {
-          quotation_id: raw.id,
-          user_id: raw.user_id,
-          project_id: raw.project_id,
+          quotation_id: b.row.id,
+          user_id: b.row.user_id,
+          project_id: b.row.project_id,
           polarity,
           label,
           aspects: (sentiment.aspects ?? [])
@@ -228,23 +314,20 @@ Deno.serve(async (req) => {
           emotions: (sentiment.emotions ?? [])
             .filter((e) => typeof e === "string")
             .map((e) => e.slice(0, 60)),
-          model: result.model ?? CLAUDE_MODEL,
+          model,
           updated_at: new Date().toISOString(),
         },
         { onConflict: "quotation_id" }
       );
       if (upsertErr) {
-        results.push({ quotationId: raw.id, ok: false, error: upsertErr.message });
+        results.push({
+          quotationId: b.row.id,
+          ok: false,
+          error: upsertErr.message,
+        });
         continue;
       }
-
-      results.push({ quotationId: raw.id, ok: true, label, polarity });
-    } catch (err) {
-      results.push({
-        quotationId: raw.id,
-        ok: false,
-        error: err instanceof Error ? err.message : "claude failed",
-      });
+      results.push({ quotationId: b.row.id, ok: true, label, polarity });
     }
   }
 

@@ -1,6 +1,15 @@
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const DEFAULT_MODEL = "claude-sonnet-4-5-20250929";
 
+// Haiku 4.5: ~3x cheaper than Sonnet on input ($1 vs $3 / MTok) and on
+// output ($5 vs $15 / MTok), with quality that's perfectly adequate for
+// shallow tasks like sentiment classification, image OCR/description,
+// or single-quote code suggestions. Reserve Sonnet for the heavy
+// reasoning paths (auto-coding, chat, relation suggestion). Using the
+// alias instead of a dated snapshot so we get the latest stable Haiku
+// 4.5 patch automatically.
+const HAIKU_MODEL = "claude-haiku-4-5";
+
 // Retries automatically respect the `retry-after` header (in seconds) when
 // the API returns a 429 (rate limit) or 529 (overloaded) response. Capped
 // so a stuck job can't sit in an edge function for an hour.
@@ -98,14 +107,31 @@ export async function callClaude(
     throw new Error("Missing ANTHROPIC_API_KEY environment variable");
   }
 
+  // When caching is enabled, wrap the system prompt in a text block with
+  // an ephemeral cache_control marker. Anthropic caches everything from
+  // start of system up to (and including) the marker; subsequent calls
+  // within ~5 min that share the same prefix get a 10x discount on
+  // those tokens AND skip the per-minute rate-limit accounting.
+  const systemPayload =
+    options.cachePrompt && options.system
+      ? [
+          {
+            type: "text",
+            text: options.system,
+            cache_control: { type: "ephemeral" },
+          },
+        ]
+      : options.system;
+
   const body = {
     model: options.model ?? DEFAULT_MODEL,
     max_tokens: options.maxTokens ?? 4096,
     temperature: options.temperature ?? 0.3,
-    system: options.system,
+    system: systemPayload,
     messages,
   };
 
+  const startedAt = Date.now();
   const res = await fetchClaudeWithRetry(body, apiKey);
 
   if (!res.ok) {
@@ -115,6 +141,15 @@ export async function callClaude(
 
   const data = await res.json();
   const textBlock = data.content?.find((c: { type: string }) => c.type === "text");
+  const u = data.usage ?? {};
+  const cacheStr =
+    u.cache_creation_input_tokens || u.cache_read_input_tokens
+      ? ` cache=${u.cache_read_input_tokens ?? 0}r/${u.cache_creation_input_tokens ?? 0}w`
+      : "";
+  console.log(
+    `[claude] ${data.model} ${Date.now() - startedAt}ms ` +
+      `stop=${data.stop_reason} in=${u.input_tokens} out=${u.output_tokens}${cacheStr}`
+  );
   return {
     text: textBlock?.text ?? "",
     model: data.model,
@@ -429,3 +464,4 @@ function repairTruncatedJson(input: string): string | null {
 }
 
 export const CLAUDE_MODEL = DEFAULT_MODEL;
+export const CLAUDE_HAIKU = HAIKU_MODEL;

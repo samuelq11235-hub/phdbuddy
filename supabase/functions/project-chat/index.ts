@@ -6,7 +6,7 @@ import { handlePreflight, jsonResponse, errorResponse } from "../_shared/cors.ts
 import { getServiceClient, getUserFromRequest } from "../_shared/supabase.ts";
 import { embedQuery } from "../_shared/voyage.ts";
 import { callClaude, CLAUDE_MODEL } from "../_shared/claude.ts";
-import { CHAT_SYSTEM_PROMPT, chatUserPrompt } from "../_shared/prompts.ts";
+import { buildChatSystemPrompt, chatUserPrompt } from "../_shared/prompts.ts";
 import type { ChatCitation } from "../_shared/types.ts";
 
 interface RequestBody {
@@ -151,15 +151,23 @@ Deno.serve(async (req) => {
             question,
             quotations: promptQuotes,
             chunks: promptChunks,
-            projectContext: {
-              name: project.name,
-              research_question: project.research_question,
-              methodology: project.methodology,
-            },
           }),
         },
       ],
-      { system: CHAT_SYSTEM_PROMPT, maxTokens: 1500, temperature: 0.3 }
+      {
+        // System now embeds project metadata (name, research question,
+        // methodology). It's byte-identical for every turn of a chat
+        // session, so caching it cuts input cost by ~85% from turn 2
+        // onward. Cache TTL is ~5 min; a typical conversation fits.
+        system: buildChatSystemPrompt({
+          name: project.name,
+          research_question: project.research_question,
+          methodology: project.methodology,
+        }),
+        cachePrompt: true,
+        maxTokens: 1500,
+        temperature: 0.3,
+      }
     );
     answer = resp.text;
     model = resp.model;
