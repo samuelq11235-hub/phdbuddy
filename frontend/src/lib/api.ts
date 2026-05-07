@@ -269,9 +269,12 @@ export const api = {
     claim: string;
     source?: string;
     k?: number;
+    refresh?: boolean;
   }) {
     return invoke<{
       ok: true;
+      cached: boolean;
+      ageMs: number;
       counterClaim: string;
       weakSpots: {
         quotationId: string;
@@ -293,12 +296,14 @@ export const api = {
       | "discussion"
       | "limitations";
     extraGuidance?: string;
+    refresh?: boolean;
   }) {
     return invoke<{
       ok: true;
       section: string;
       content: string;
       citations: { quotationId: string; documentTitle: string; text: string }[];
+      cached: boolean;
     }>("generate-thesis-section", args);
   },
 

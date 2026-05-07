@@ -185,6 +185,10 @@ Deno.serve(async (req) => {
         },
         maxTokens: 2048,
         temperature: 0.2,
+        // System + tool schema are deterministic per-project; caching
+        // makes the second relations pass (and any later refresh) cost
+        // ~10% of the first.
+        cachePrompt: true,
       }
     );
   } catch (err) {

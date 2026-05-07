@@ -81,16 +81,17 @@ export function ThesisCopilotPanel({ projectId }: Props) {
   const createMemo = useCreateMemo();
   const [saved, setSaved] = useState(false);
 
-  async function generate() {
+  async function generate(force = false) {
     setBusy(true);
     setError(null);
     setSaved(false);
-    setResult(null);
+    if (force) setResult(null);
     try {
       const r = await api.generateThesisSection({
         projectId,
         section: active,
         extraGuidance: extraGuidance.trim() || undefined,
+        refresh: force,
       });
       setResult(r);
     } catch (e) {
@@ -172,7 +173,16 @@ export function ThesisCopilotPanel({ projectId }: Props) {
                 cada cita antes de publicar.
               </p>
             </div>
-            <Button onClick={generate} disabled={busy} className="gap-1.5">
+            <Button
+              onClick={() => generate(!!result)}
+              disabled={busy}
+              className="gap-1.5"
+              title={
+                result
+                  ? "Recomputar ignorando la caché"
+                  : "Generar (devuelve caché si está fresca)"
+              }
+            >
               {busy ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (

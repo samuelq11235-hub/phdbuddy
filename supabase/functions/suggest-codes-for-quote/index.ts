@@ -191,10 +191,10 @@ Deno.serve(async (req) => {
         toolDescription:
           "Devuelve los códigos del codebook que aplican a esta cita y, si hace falta, 1-2 códigos nuevos.",
         inputSchema: SUGGEST_TOOL_SCHEMA,
-        // The tool schema caps results at ~4 codes total; each code is
-        // ~30 tokens. 768 leaves headroom for verbose rationales without
-        // burning output budget on edge cases.
-        maxTokens: 768,
+        // Tool schema caps at ~4 codes (≈30 tok each). Even with a
+        // verbose rationale, observed p95 output is ~380 tok — 512
+        // is plenty and trims output spend.
+        maxTokens: 512,
         temperature: 0.2,
         // System + schema are stable across calls in a session; caching
         // brings the input bill down to ~10% on repeated invocations.

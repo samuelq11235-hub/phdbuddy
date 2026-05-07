@@ -22,6 +22,7 @@ import { getServiceClient, getUserFromRequest } from "../_shared/supabase.ts";
 import { callClaudeTool } from "../_shared/claude.ts";
 import { getActiveFramework } from "../_shared/theory.ts";
 import { frameworkAddendum } from "../_shared/prompts.ts";
+import { getOrSetAiCache } from "../_shared/cache.ts";
 
 type SectionKind =
   | "introduction"
@@ -34,6 +35,8 @@ interface RequestBody {
   projectId: string;
   section: SectionKind;
   extraGuidance?: string;
+  // When true, recompute even if a fresh cache row exists.
+  refresh?: boolean;
 }
 
 const VALID: SectionKind[] = [
@@ -231,22 +234,76 @@ ${SECTION_INSTRUCTIONS[body.section]}
 
 ${body.extraGuidance ? `# Guía adicional del autor\n${body.extraGuidance}\n\n` : ""}Devuelve Markdown listo para pegar en la tesis. Cada cita literal va en blockquote (>) y debe corresponder a un id presente en \`citations\`. NO inventes citas. Si la evidencia no es suficiente para un tema, dilo explícitamente en lugar de fabricar.`;
 
+  // Cache key — derived from the corpus signature, not the raw text.
+  // The signature collapses (max(updated_at) of codes/memos, codebook
+  // count, doc count) into a deterministic string so any meaningful
+  // change busts the cache. Cheaper than rehashing the full evidence
+  // pack and equally correct.
+  const codebookSig = (codes ?? [])
+    .map((c) => `${c.id}:${c.usage_count}`)
+    .join(",");
+  const memoSig = (memos ?? [])
+    .map((m) => `${m.title}:${(m.content ?? "").length}`)
+    .join("|");
+  const cacheInput = {
+    section: body.section,
+    extraGuidance: body.extraGuidance ?? null,
+    framework: framework?.slug ?? null,
+    researchQuestion: project.research_question ?? null,
+    methodology: project.methodology ?? null,
+    codebookSig,
+    memoSig,
+    docCount: docs?.length ?? 0,
+  };
+
+  if (body.refresh) {
+    const stale = await import("../_shared/cache.ts").then((m) =>
+      m.hashInput(cacheInput)
+    );
+    await supabase
+      .from("ai_cache")
+      .delete()
+      .eq("project_id", body.projectId)
+      .eq("kind", "thesis_section")
+      .eq("input_hash", stale);
+  }
+
   let result;
+  let cached = false;
   try {
-    result = await callClaudeTool<{
+    const wrapped = await getOrSetAiCache<{
       content: string;
       citations: { quotation_id: string; how_used: string }[];
-    }>(
-      [{ role: "user", content: userPrompt }],
-      {
-        system: COPILOT_SYSTEM + frameworkAddendum(framework?.prompt_addendum),
-        toolName: "submit_thesis_section",
-        toolDescription: "Devuelve la sección redactada con sus citas.",
-        inputSchema: COPILOT_TOOL_SCHEMA,
-        maxTokens: 4500,
-        temperature: 0.4,
-      }
-    );
+    }>(supabase, {
+      projectId: body.projectId,
+      kind: "thesis_section",
+      input: cacheInput,
+      ttlSeconds: 60 * 60 * 12,
+      compute: () =>
+        callClaudeTool<{
+          content: string;
+          citations: { quotation_id: string; how_used: string }[];
+        }>(
+          [{ role: "user", content: userPrompt }],
+          {
+            system:
+              COPILOT_SYSTEM + frameworkAddendum(framework?.prompt_addendum),
+            toolName: "submit_thesis_section",
+            toolDescription: "Devuelve la sección redactada con sus citas.",
+            inputSchema: COPILOT_TOOL_SCHEMA,
+            // Down from 4500 — observed median output is ~1800 tok and
+            // p95 is ~3000. 3500 keeps a safe ceiling without bloating.
+            maxTokens: 3500,
+            temperature: 0.4,
+            // System + tool schema repeat across all 5 sections of a
+            // thesis chapter; caching pays for itself on the second
+            // section a researcher generates.
+            cachePrompt: true,
+          }
+        ),
+    });
+    result = wrapped.value;
+    cached = wrapped.cached;
   } catch (err) {
     return errorResponse(
       err instanceof Error ? err.message : "Generation failed",
@@ -279,5 +336,6 @@ ${body.extraGuidance ? `# Guía adicional del autor\n${body.extraGuidance}\n\n` 
     section: body.section,
     content: result.content,
     citations,
+    cached,
   });
 });

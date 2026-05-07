@@ -51,12 +51,17 @@ export function DevilsAdvocateDialog({
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<Result | null>(null);
 
-  async function run() {
+  async function run(refresh = false) {
     setBusy(true);
     setError(null);
-    setResult(null);
+    if (refresh) setResult(null);
     try {
-      const r = await api.devilsAdvocate({ projectId, claim, source });
+      const r = await api.devilsAdvocate({
+        projectId,
+        claim,
+        source,
+        refresh,
+      });
       setResult({
         counterClaim: r.counterClaim,
         weakSpots: r.weakSpots,
@@ -109,7 +114,7 @@ export function DevilsAdvocateDialog({
           />
           <div className="flex justify-end gap-2">
             <Button
-              onClick={run}
+              onClick={() => run(false)}
               disabled={busy || claim.trim().length < 8}
               className="gap-1.5"
             >
@@ -152,8 +157,9 @@ export function DevilsAdvocateDialog({
                     Citas que tensan la afirmación ({result.weakSpots.length})
                   </p>
                   <button
-                    onClick={run}
+                    onClick={() => run(true)}
                     className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+                    title="Forzar recálculo (ignora caché)"
                   >
                     <RefreshCw className="h-3 w-3" />
                     Reanalizar

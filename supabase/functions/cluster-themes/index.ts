@@ -161,8 +161,11 @@ Deno.serve(async (req) => {
         toolDescription:
           "Devuelve una etiqueta y descripción para cada cluster identificado.",
         inputSchema: THEME_TOOL_SCHEMA,
-        maxTokens: 4096,
+        // Target ~6-10 themes × ~120 tok each = ~1200 tok output;
+        // 2500 is a safe cap and saves on the runaway path.
+        maxTokens: 2500,
         temperature: 0.2,
+        cachePrompt: true,
       }
     );
     labels = r.data;

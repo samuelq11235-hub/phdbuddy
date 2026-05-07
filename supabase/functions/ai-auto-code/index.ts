@@ -403,7 +403,10 @@ async function runAutoCodeJob(input: JobInput) {
         toolDescription:
           "Devuelve el libro de códigos propuesto (sin citas — esas vendrán en un segundo paso).",
         inputSchema: CODEBOOK_TOOL_SCHEMA,
-        maxTokens: 4000,
+        // Adaptive cap: ~80 tokens per code (incl description), 8-25
+        // codes target — never need more than ~2400 tok of output.
+        // Old static 4000 was over-provisioned for short docs.
+        maxTokens: 2500,
         temperature: 0.2,
         // Cache the system prompt + tool schema. Pass-1 only runs once
         // per job so this is a cache-write only; the savings come on
@@ -518,7 +521,14 @@ async function runAutoCodeJob(input: JobInput) {
           toolDescription:
             "Devuelve las citas literales seleccionadas y los códigos asignados.",
           inputSchema: QUOTATIONS_TOOL_SCHEMA,
-          maxTokens: 8000,
+          // Adaptive cap: ~250 tok per quote × target count + 25%
+          // overhead. Capped at 4500 — the old 8000 was 2x what even
+          // pathologically dense chunks emit, and a runaway response
+          // can burn output tokens with no benefit.
+          maxTokens: Math.min(
+            4500,
+            Math.max(1500, (chunks.length === 1 ? 12 : 8) * 320)
+          ),
           temperature: 0.2,
           // Cache the system + tool schema. The first chunk writes the
           // cache; every subsequent chunk in the same job hits it,

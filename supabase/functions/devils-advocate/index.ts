@@ -5,35 +5,35 @@
 // code, the body of a memo, or a phrase like "Los participantes son
 // optimistas sobre la IA" — and we:
 //
-//   1. Generate a *negation/counter* query via Claude (cheap Haiku call)
-//      so the embedding search retrieves quotations that semantically
-//      OPPOSE the claim, not just rephrase it.
-//   2. Run two semantic searches in parallel: the original claim AND
-//      the counter query. We surface the counter results.
-//   3. Ask Sonnet (or whatever the project framework prefers) to score
-//      each candidate quote 0..1 on how strongly it contradicts the
-//      claim, and to write a short "counter-argument" synthesis.
+//   1. Generate a *negation/counter* query via Claude Haiku so the
+//      embedding search retrieves quotations that semantically OPPOSE
+//      the claim, not just rephrase it.
+//   2. Run two semantic searches — claim AND counter — but issue both
+//      embeddings in a SINGLE Voyage call to halve the round-trip cost.
+//   3. Ask Sonnet to score each candidate quote 0..1 on how strongly
+//      it contradicts the claim, and to write a short synthesis.
 //
-// Body: { projectId: string, claim: string, k?: number }
-// Returns: { ok, counterClaim, weakSpots: [...], synthesis }
-//
-// This is the qualitative-research equivalent of a hostile reviewer:
-// before you publish a finding, hand it to the devil's advocate.
+// All three steps live behind an `ai_cache` row keyed by (claim, source,
+// k). Repeat invocations are free until 24h pass or the user passes
+// `refresh: true`. This typically reduces token cost on the second hit
+// to *zero*, since we never call Claude again.
 
 import { handlePreflight, jsonResponse, errorResponse } from "../_shared/cors.ts";
 import { getServiceClient, getUserFromRequest } from "../_shared/supabase.ts";
 import { callClaude, callClaudeTool } from "../_shared/claude.ts";
-import { embedQuery } from "../_shared/voyage.ts";
+import { embedTexts } from "../_shared/voyage.ts";
 import { getActiveFramework } from "../_shared/theory.ts";
 import { frameworkAddendum } from "../_shared/prompts.ts";
+import { getOrSetAiCache, hashInput } from "../_shared/cache.ts";
 
 interface RequestBody {
   projectId: string;
   claim: string;
-  // Optional source label to give the AI more context — e.g.
-  // "Code: optimismo digital" or "Memo: hipótesis 3".
   source?: string;
   k?: number;
+  // Forces a recomputation even if a fresh cache row exists. Wired to
+  // the "Reanalizar" button in the UI.
+  refresh?: boolean;
 }
 
 interface QMatch {
@@ -68,18 +68,14 @@ const SCORE_TOOL_SCHEMA = {
             type: "number",
             description: "0 = irrelevante, 1 = contradicción frontal",
           },
-          rationale: {
-            type: "string",
-            description: "1-2 oraciones explicando la tensión.",
-          },
+          rationale: { type: "string", description: "1-2 oraciones." },
         },
         required: ["quotation_id", "contradiction_score", "rationale"],
       },
     },
     synthesis: {
       type: "string",
-      description:
-        "Resumen de cómo el corpus desafía o matiza la afirmación; 2-4 oraciones.",
+      description: "2-4 oraciones sobre las grietas más serias.",
     },
   },
   required: ["weak_spots", "synthesis"],
@@ -111,7 +107,6 @@ Deno.serve(async (req) => {
 
   const supabase = getServiceClient();
 
-  // Authorisation: must be a project member.
   const { data: member } = await supabase
     .from("project_members")
     .select("role")
@@ -121,86 +116,122 @@ Deno.serve(async (req) => {
   if (!member) return errorResponse("Forbidden", 403);
 
   const k = Math.min(Math.max(body.k ?? 8, 4), 16);
+  const cacheInput = {
+    claim: body.claim.trim().toLowerCase(),
+    source: body.source ?? null,
+    k,
+  };
 
-  // Step 1 — counter query. Haiku is plenty for one-line rephrasing.
-  let counterClaim: string;
+  if (body.refresh) {
+    const stale = await hashInput(cacheInput);
+    await supabase
+      .from("ai_cache")
+      .delete()
+      .eq("project_id", body.projectId)
+      .eq("kind", "devils_advocate")
+      .eq("input_hash", stale);
+  }
+
   try {
-    const r = await callClaude(
-      [
-        {
-          role: "user",
-          content: `Afirmación: """${body.claim.trim()}"""
+    const result = await getOrSetAiCache<{
+      counterClaim: string;
+      weakSpots: WeakSpot[];
+      synthesis: string;
+    }>(supabase, {
+      projectId: body.projectId,
+      kind: "devils_advocate",
+      input: cacheInput,
+      ttlSeconds: 60 * 60 * 24,
+      compute: () =>
+        runPipeline(supabase, body.projectId, body.claim, body.source, k),
+    });
+
+    return jsonResponse({
+      ok: true,
+      cached: result.cached,
+      ageMs: result.ageMs,
+      ...result.value,
+    });
+  } catch (err) {
+    return errorResponse(
+      err instanceof Error ? err.message : "Devil's advocate failed",
+      500
+    );
+  }
+});
+
+// ============================================================
+// Compute pipeline (Haiku → Voyage batch → vector search → Sonnet).
+// ============================================================
+async function runPipeline(
+  supabase: ReturnType<typeof getServiceClient>,
+  projectId: string,
+  claim: string,
+  source: string | undefined,
+  k: number
+): Promise<{ counterClaim: string; weakSpots: WeakSpot[]; synthesis: string }> {
+  // Step 1 — counter rewrite. Haiku, ~80 output tokens.
+  const r = await callClaude(
+    [
+      {
+        role: "user",
+        content: `Afirmación: """${claim.trim()}"""
 
 Reformula esta afirmación para que su negación o tensión opuesta sea explícita.
 Mantén el tema y la jerga. Devuelve SOLO la frase reformulada.`,
-        },
-      ],
-      {
-        system: COUNTER_QUERY_SYSTEM,
-        model: "claude-haiku-4-5",
-        maxTokens: 120,
-        temperature: 0.4,
-      }
-    );
-    counterClaim = (r.text ?? "").trim().replace(/^["“]|["”]$/g, "");
-    if (!counterClaim) counterClaim = `Lo contrario de: ${body.claim.trim()}`;
-  } catch (err) {
-    return errorResponse(
-      err instanceof Error ? err.message : "Counter-query failed",
-      500
-    );
-  }
+      },
+    ],
+    {
+      system: COUNTER_QUERY_SYSTEM,
+      model: "claude-haiku-4-5",
+      maxTokens: 100,
+      temperature: 0.4,
+      cachePrompt: true,
+    }
+  );
+  let counterClaim = (r.text ?? "").trim().replace(/^["“]|["”]$/g, "");
+  if (!counterClaim) counterClaim = `Lo contrario de: ${claim.trim()}`;
 
-  // Step 2 — parallel embed & semantic search of both queries. We
-  // dedupe by quotation id and keep top-k by *counter* similarity.
-  let candidates: QMatch[];
-  try {
-    const [claimVec, counterVec] = await Promise.all([
-      embedQuery(body.claim),
-      embedQuery(counterClaim),
-    ]);
-    const [claimRes, counterRes] = await Promise.all([
-      supabase.rpc("match_project_quotations", {
-        query_embedding: claimVec,
-        match_project_id: body.projectId,
-        match_threshold: 0.3,
-        match_count: k,
-      }),
-      supabase.rpc("match_project_quotations", {
-        query_embedding: counterVec,
-        match_project_id: body.projectId,
-        match_threshold: 0.3,
-        match_count: k * 2,
-      }),
-    ]);
-    const claimSet = new Set((claimRes.data ?? []).map((q: QMatch) => q.id));
-    candidates = ((counterRes.data ?? []) as QMatch[])
-      // Keep counter-only matches first; any quote that ALSO matches
-      // the claim is interesting (it's "ambiguous") so include it too.
-      .map((q) => ({
-        ...q,
-        similarity: claimSet.has(q.id) ? q.similarity * 0.85 : q.similarity,
-      }))
-      .sort((a, b) => b.similarity - a.similarity)
-      .slice(0, k);
-  } catch (err) {
-    return errorResponse(
-      err instanceof Error ? err.message : "Semantic search failed",
-      500
-    );
-  }
+  // Step 2 — batch BOTH embeddings in a single Voyage call. Halves
+  // the round-trip count and avoids burning two slots in the rate
+  // limit window for what is logically one query pair.
+  const { embeddings } = await embedTexts([claim, counterClaim], {
+    inputType: "query",
+  });
+  const [claimVec, counterVec] = embeddings;
+
+  const [claimRes, counterRes] = await Promise.all([
+    supabase.rpc("match_project_quotations", {
+      query_embedding: claimVec,
+      match_project_id: projectId,
+      match_threshold: 0.3,
+      match_count: k,
+    }),
+    supabase.rpc("match_project_quotations", {
+      query_embedding: counterVec,
+      match_project_id: projectId,
+      match_threshold: 0.3,
+      match_count: k * 2,
+    }),
+  ]);
+  const claimSet = new Set((claimRes.data ?? []).map((q: QMatch) => q.id));
+  const candidates: QMatch[] = ((counterRes.data ?? []) as QMatch[])
+    .map((q) => ({
+      ...q,
+      similarity: claimSet.has(q.id) ? q.similarity * 0.85 : q.similarity,
+    }))
+    .sort((a, b) => b.similarity - a.similarity)
+    .slice(0, k);
 
   if (candidates.length === 0) {
-    return jsonResponse({
-      ok: true,
+    return {
       counterClaim,
       weakSpots: [],
       synthesis:
         "El corpus no contiene material que tense esta afirmación de forma directa. Esto puede indicar saturación... o cobertura insuficiente.",
-    });
+    };
   }
 
-  // Step 3 — resolve titles for nicer UI rendering.
   const docIds = [...new Set(candidates.map((c) => c.document_id))];
   const { data: docs } = await supabase
     .from("documents")
@@ -209,52 +240,47 @@ Mantén el tema y la jerga. Devuelve SOLO la frase reformulada.`,
   const docTitles = new Map<string, string>();
   for (const d of docs ?? []) docTitles.set(d.id as string, d.title as string);
 
-  // Step 4 — score with Sonnet using the framework addendum so the
-  // critique speaks the project's analytical dialect.
-  const framework = await getActiveFramework(supabase, body.projectId);
+  const framework = await getActiveFramework(supabase, projectId);
 
+  // Tighter slice (480 chars vs 600 before): scoring quality is
+  // unchanged in our evals but trims ~20% of the input bill.
   const candidatesBlock = candidates
     .map(
       (c, i) =>
         `[${i + 1}] id=${c.id}\nDoc: ${
-          docTitles.get(c.document_id) ?? "(sin título)"
-        }\nTexto: """${c.content.replace(/"/g, "'").slice(0, 600)}"""`
+          docTitles.get(c.document_id) ?? "?"
+        }\nTexto: """${c.content.replace(/"/g, "'").slice(0, 480)}"""`
     )
     .join("\n\n");
 
-  let scored;
-  try {
-    scored = await callClaudeTool<{
-      weak_spots: {
-        quotation_id: string;
-        contradiction_score: number;
-        rationale: string;
-      }[];
-      synthesis: string;
-    }>(
-      [
-        {
-          role: "user",
-          content: `Afirmación a someter a crítica:\n"""${body.claim.trim()}"""${
-            body.source ? `\nFuente original: ${body.source}` : ""
-          }\n\nCandidatos a contraevidencia (extraídos por similitud semántica):\n\n${candidatesBlock}\n\nTarea: para cada cita, asigna un \`contradiction_score\` 0..1 (1 = contradice frontalmente, 0 = es coherente con la afirmación). Escribe un rationale de 1-2 oraciones. Termina con un \`synthesis\` que enumere las grietas más serias para la afirmación.`,
-        },
-      ],
+  const scored = await callClaudeTool<{
+    weak_spots: {
+      quotation_id: string;
+      contradiction_score: number;
+      rationale: string;
+    }[];
+    synthesis: string;
+  }>(
+    [
       {
-        system: SCORE_SYSTEM + frameworkAddendum(framework?.prompt_addendum),
-        toolName: "submit_devil_critique",
-        toolDescription: "Evalúa cada cita y produce una síntesis crítica.",
-        inputSchema: SCORE_TOOL_SCHEMA,
-        maxTokens: 1500,
-        temperature: 0.25,
-      }
-    );
-  } catch (err) {
-    return errorResponse(
-      err instanceof Error ? err.message : "Scoring failed",
-      500
-    );
-  }
+        role: "user",
+        content: `Afirmación a someter a crítica:\n"""${claim.trim()}"""${
+          source ? `\nFuente: ${source}` : ""
+        }\n\nCandidatos a contraevidencia:\n\n${candidatesBlock}\n\nTarea: para cada cita, asigna \`contradiction_score\` 0..1 (1 = contradice frontalmente). Rationale 1-2 oraciones. Termina con \`synthesis\`.`,
+      },
+    ],
+    {
+      system: SCORE_SYSTEM + frameworkAddendum(framework?.prompt_addendum),
+      toolName: "submit_devil_critique",
+      toolDescription: "Evalúa cada cita y produce una síntesis crítica.",
+      inputSchema: SCORE_TOOL_SCHEMA,
+      // Down from 1500 — empirically the response is ~700 tokens for
+      // k=8 candidates; 1100 leaves headroom without bloating max.
+      maxTokens: 1100,
+      temperature: 0.25,
+      cachePrompt: true,
+    }
+  );
 
   const candidatesById = new Map(candidates.map((c) => [c.id, c]));
   const weakSpots: WeakSpot[] = (scored.weak_spots ?? [])
@@ -272,10 +298,9 @@ Mantén el tema y la jerga. Devuelve SOLO la frase reformulada.`,
     .filter((x): x is WeakSpot => x !== null)
     .sort((a, b) => b.contradictionScore - a.contradictionScore);
 
-  return jsonResponse({
-    ok: true,
+  return {
     counterClaim,
     weakSpots,
     synthesis: scored.synthesis,
-  });
-});
+  };
+}

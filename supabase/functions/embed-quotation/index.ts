@@ -37,7 +37,7 @@ Deno.serve(async (req) => {
 
   const { data: quote, error } = await supabase
     .from("quotations")
-    .select("id, user_id, content")
+    .select("id, user_id, content, embedding")
     .eq("id", quotationId)
     .eq("user_id", userId)
     .single();
@@ -45,6 +45,13 @@ Deno.serve(async (req) => {
   if (error || !quote) return errorResponse("Quotation not found", 404);
   if (!quote.content || quote.content.trim().length === 0) {
     return errorResponse("Quotation content is empty", 400);
+  }
+
+  // Skip if we already have an embedding for this quotation. The client
+  // sometimes retries after a failure or fires from multiple places —
+  // this guards against double-billing Voyage for identical text.
+  if (quote.embedding) {
+    return jsonResponse({ ok: true, skipped: true });
   }
 
   try {
