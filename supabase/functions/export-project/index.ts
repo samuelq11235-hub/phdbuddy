@@ -189,12 +189,9 @@ Deno.serve(async (req) => {
         extension = "html";
       } else if (format === "docx") {
         fileBytes = buildDocx(baseInput);
-        // Force Office to claim the file. Older Office builds get
-        // grumpy with application/vnd.openxmlformats-officedocument...
-        // when the payload is HTML, so we use the legacy .doc MIME
-        // which both Office 2007+ and LibreOffice handle cleanly.
-        contentType = "application/msword";
-        extension = "doc";
+        contentType =
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        extension = "docx";
       } else {
         fileBytes = buildMarkdown(baseInput);
         contentType = "text/markdown";

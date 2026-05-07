@@ -46,8 +46,8 @@ const FORMATS: Format[] = [
   },
   {
     id: "docx",
-    label: "Word (.doc)",
-    description: "Informe Word-compatible — abre directo en Word, Pages, LibreOffice",
+    label: "Word (.docx)",
+    description: "Documento Word nativo (OOXML) — abre directo en Word, Pages, Google Docs, LibreOffice",
     icon: FileType2,
     ext: "doc",
   },

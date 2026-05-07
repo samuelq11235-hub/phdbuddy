@@ -4,11 +4,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Loader2, BarChart3, Search, Network as NetworkIcon, Smile, Table2 } from "lucide-react";
+import { Loader2, BarChart3, Search, Network as NetworkIcon, Smile, Table2, Sparkles } from "lucide-react";
 import { useTextFrequency, useTextKwic, useCooccurrence } from "@/hooks/useTextAnalysis";
 import { SentimentDashboard } from "@/components/analysis/SentimentDashboard";
 import { WordCloud } from "@/components/analysis/WordCloud";
 import { AttributeCodeCrossTab } from "@/components/analysis/AttributeCodeCrossTab";
+import { ConceptCloud } from "@/components/analysis/ConceptCloud";
 
 interface Props {
   projectId: string;
@@ -33,6 +34,7 @@ export function TextAnalysisPanel({ projectId }: Props) {
           <TabsTrigger value="cooc"><NetworkIcon className="mr-1.5 h-4 w-4" />Co-ocurrencia</TabsTrigger>
           <TabsTrigger value="sentiment"><Smile className="mr-1.5 h-4 w-4" />Sentimiento</TabsTrigger>
           <TabsTrigger value="crosstab"><Table2 className="mr-1.5 h-4 w-4" />Cross-tab</TabsTrigger>
+          <TabsTrigger value="concept"><Sparkles className="mr-1.5 h-4 w-4" />Concept cloud</TabsTrigger>
         </TabsList>
         <div className="mt-4">
           <TabsContent value="frequency"><FrequencyTab projectId={projectId} /></TabsContent>
@@ -41,6 +43,7 @@ export function TextAnalysisPanel({ projectId }: Props) {
           <TabsContent value="cooc"><CooccurrenceTab projectId={projectId} /></TabsContent>
           <TabsContent value="sentiment"><SentimentDashboard projectId={projectId} /></TabsContent>
           <TabsContent value="crosstab"><AttributeCodeCrossTab projectId={projectId} /></TabsContent>
+          <TabsContent value="concept"><ConceptCloud projectId={projectId} /></TabsContent>
         </div>
       </Tabs>
     </div>

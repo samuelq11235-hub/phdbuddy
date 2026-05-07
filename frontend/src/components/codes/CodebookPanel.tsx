@@ -12,6 +12,7 @@ import {
   CheckSquare,
   Wand2,
   GitMerge,
+  Scissors,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -38,6 +39,7 @@ import { NewCodeGroupDialog } from "./NewCodeGroupDialog";
 import { AssignToGroupDialog } from "./AssignToGroupDialog";
 import { SmartCodeDrawer } from "./SmartCodeDrawer";
 import { MergeCodesDialog } from "./MergeCodesDialog";
+import { SplitCodeDialog } from "./SplitCodeDialog";
 
 type ViewMode = "tree" | "groups";
 
@@ -489,6 +491,24 @@ function CodeRow({
               >
                 <Pencil className="h-3.5 w-3.5" />
               </Button>
+              {node.usage_count >= 2 && !node.smart_query_id ? (
+                <SplitCodeDialog
+                  projectId={projectId}
+                  sourceCodeId={node.id}
+                  sourceCodeName={node.name}
+                  trigger={
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7"
+                      aria-label="Dividir código"
+                      title="Dividir este código en dos"
+                    >
+                      <Scissors className="h-3.5 w-3.5" />
+                    </Button>
+                  }
+                />
+              ) : null}
               <Button
                 size="icon"
                 variant="ghost"
