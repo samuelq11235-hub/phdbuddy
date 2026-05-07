@@ -120,6 +120,63 @@ export function AttributeCodeCrossTab({ projectId }: { projectId: string }) {
     return rows;
   }, [valueToDocs, codingsByDoc]);
 
+  // F32 — mixed-methods bridge: per-column statistics.
+  //
+  // For every code we test the null hypothesis that its distribution
+  // across the attribute buckets is independent of the attribute. We
+  // approximate via Pearson's χ² on a `[code present | code absent]`
+  // contingency table per row, then look up a critical value. We also
+  // return the dominant bucket so the UI can label "Strongest in: X".
+  //
+  // p-value is approximated from the χ² statistic with df = rows-1
+  // using a Wilson-Hilferty cubic-root approximation. It's accurate
+  // to ~0.005 around the standard significance thresholds.
+  const stats = useMemo(() => {
+    const result = new Map<
+      string,
+      { chi2: number; df: number; pApprox: number; dominant: string | null }
+    >();
+    if (matrix.length < 2) return result;
+    const grand = matrix.reduce((a, b) => a + b.total, 0);
+    if (grand === 0) return result;
+    for (const code of topCodes) {
+      const codeTotal = matrix.reduce(
+        (a, r) => a + (r.perCode.get(code.id) ?? 0),
+        0
+      );
+      if (codeTotal === 0) continue;
+      let chi2 = 0;
+      let dominantValue: string | null = null;
+      let dominantRatio = 0;
+      for (const row of matrix) {
+        const rowTotal = row.total;
+        if (rowTotal === 0) continue;
+        const observedCode = row.perCode.get(code.id) ?? 0;
+        const observedNotCode = rowTotal - observedCode;
+        const expectedCode = (rowTotal * codeTotal) / grand;
+        const expectedNotCode = rowTotal - expectedCode;
+        if (expectedCode > 0)
+          chi2 += Math.pow(observedCode - expectedCode, 2) / expectedCode;
+        if (expectedNotCode > 0)
+          chi2 +=
+            Math.pow(observedNotCode - expectedNotCode, 2) / expectedNotCode;
+        const ratio = observedCode / Math.max(rowTotal, 1);
+        if (ratio > dominantRatio) {
+          dominantRatio = ratio;
+          dominantValue = row.value;
+        }
+      }
+      const df = matrix.length - 1;
+      result.set(code.id, {
+        chi2,
+        df,
+        pApprox: chi2PValueApprox(chi2, df),
+        dominant: dominantValue,
+      });
+    }
+    return result;
+  }, [matrix, topCodes]);
+
   if (schema.length === 0) {
     return (
       <div className="rounded-lg border border-dashed bg-muted/20 p-6 text-center">
@@ -196,22 +253,40 @@ export function AttributeCodeCrossTab({ projectId }: { projectId: string }) {
                   {effectiveAttr}
                 </th>
                 <th className="px-3 py-2 text-right font-medium">Σ</th>
-                {topCodes.map((c) => (
-                  <th
-                    key={c.id}
-                    className="whitespace-nowrap px-2 py-2 text-right font-medium"
-                    style={{ minWidth: 80 }}
-                    title={c.name}
-                  >
-                    <div className="flex items-center justify-end gap-1">
-                      <span
-                        className="h-2 w-2 rounded-full"
-                        style={{ backgroundColor: c.color }}
-                      />
-                      <span className="truncate">{c.name}</span>
-                    </div>
-                  </th>
-                ))}
+                {topCodes.map((c) => {
+                  const s = stats.get(c.id);
+                  const sig = s ? significanceLabel(s.pApprox) : null;
+                  return (
+                    <th
+                      key={c.id}
+                      className="whitespace-nowrap px-2 py-2 text-right font-medium"
+                      style={{ minWidth: 80 }}
+                      title={
+                        s
+                          ? `${c.name}\nχ²(${s.df}) = ${s.chi2.toFixed(2)}; p ≈ ${s.pApprox.toFixed(3)}${
+                              s.dominant ? `; pico en: ${s.dominant}` : ""
+                            }`
+                          : c.name
+                      }
+                    >
+                      <div className="flex items-center justify-end gap-1">
+                        <span
+                          className="h-2 w-2 rounded-full"
+                          style={{ backgroundColor: c.color }}
+                        />
+                        <span className="truncate">{c.name}</span>
+                        {sig ? (
+                          <span
+                            className={`ml-1 rounded px-1 text-[9px] font-bold ${sig.cls}`}
+                            title={sig.label}
+                          >
+                            {sig.mark}
+                          </span>
+                        ) : null}
+                      </div>
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             <tbody>
@@ -258,6 +333,57 @@ function heatAlpha(value: number, rowTotal: number): string {
   const ratio = Math.min(1, value / rowTotal);
   const a = Math.round(20 + ratio * 130);
   return a.toString(16).padStart(2, "0");
+}
+
+function significanceLabel(p: number): { mark: string; label: string; cls: string } | null {
+  if (p < 0.001)
+    return {
+      mark: "***",
+      label: `χ² test p < 0.001`,
+      cls: "bg-emerald-100 text-emerald-700",
+    };
+  if (p < 0.01)
+    return {
+      mark: "**",
+      label: `χ² test p < 0.01`,
+      cls: "bg-emerald-100 text-emerald-700",
+    };
+  if (p < 0.05)
+    return {
+      mark: "*",
+      label: `χ² test p < 0.05`,
+      cls: "bg-amber-100 text-amber-700",
+    };
+  return null;
+}
+
+// Wilson-Hilferty cubic-root approximation: maps χ² to p-value via a
+// transformation that lands on a standard normal. Accurate to ~0.005
+// around the canonical significance thresholds (df ≥ 1, χ² ≥ 0.5).
+// We avoid pulling a stats library for what amounts to a heat-map
+// readability cue, not a rigorous test.
+function chi2PValueApprox(chi2: number, df: number): number {
+  if (chi2 <= 0 || df <= 0) return 1;
+  const k = df;
+  const z = (Math.cbrt(chi2 / k) - (1 - 2 / (9 * k))) / Math.sqrt(2 / (9 * k));
+  // Two-sided isn't meaningful for χ² — use upper tail.
+  return 1 - normalCdf(z);
+}
+
+function normalCdf(z: number): number {
+  // Abramowitz & Stegun 7.1.26 — max error ~1.5e-7.
+  const t = 1 / (1 + 0.2316419 * Math.abs(z));
+  const d = 0.3989422804014327 * Math.exp((-z * z) / 2);
+  const p =
+    d *
+    t *
+    (0.319381530 +
+      t *
+        (-0.356563782 +
+          t *
+            (1.781477937 +
+              t * (-1.821255978 + t * 1.330274429))));
+  return z >= 0 ? 1 - p : p;
 }
 
 function exportCrossTabCsv(

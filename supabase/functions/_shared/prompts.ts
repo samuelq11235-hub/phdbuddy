@@ -1,6 +1,18 @@
 // Plantillas de prompts para las edge functions CAQDAS de PHDBuddy.
 // Centralizadas para poder iterarlas sin tocar la lógica de las funciones.
 
+/**
+ * Wraps a theoretical framework's `prompt_addendum` so every AI call in
+ * the project speaks the same analytical dialect. Returns an empty
+ * string when no framework is active so existing prompts behave the
+ * same as before. Always include the wrapper at the *end* of the
+ * system prompt — it must take precedence over generic instructions.
+ */
+export function frameworkAddendum(addendum: string | null | undefined): string {
+  if (!addendum) return "";
+  return `\n\nMarco teórico activo del proyecto:\n${addendum.trim()}`;
+}
+
 // System prompt deliberately compact: the JSON tool schema enforces the
 // structural rules; the prompt only needs to convey ANALYTICAL intent.
 // Repeating schema rules here was burning ~150 tokens per call for no

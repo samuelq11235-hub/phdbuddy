@@ -264,7 +264,123 @@ export const api = {
     }>("generate-network", args);
   },
 
+  devilsAdvocate(args: {
+    projectId: string;
+    claim: string;
+    source?: string;
+    k?: number;
+  }) {
+    return invoke<{
+      ok: true;
+      counterClaim: string;
+      weakSpots: {
+        quotationId: string;
+        documentTitle: string;
+        text: string;
+        contradictionScore: number;
+        rationale: string;
+      }[];
+      synthesis: string;
+    }>("devils-advocate", args);
+  },
+
+  generateThesisSection(args: {
+    projectId: string;
+    section:
+      | "introduction"
+      | "methodology"
+      | "findings"
+      | "discussion"
+      | "limitations";
+    extraGuidance?: string;
+  }) {
+    return invoke<{
+      ok: true;
+      section: string;
+      content: string;
+      citations: { quotationId: string; documentTitle: string; text: string }[];
+    }>("generate-thesis-section", args);
+  },
+
+  reproducibilityReport(projectId: string) {
+    return invoke<{ ok: true; report: ReproducibilityReportPayload }>(
+      "reproducibility-report",
+      { projectId }
+    );
+  },
+
 };
+
+export interface ReproducibilityReportPayload {
+  generatedAt: string;
+  generatedByUserId: string;
+  schemaVersion: number;
+  project: {
+    id: string;
+    name: string;
+    description: string | null;
+    research_question: string | null;
+    methodology: string | null;
+    color: string;
+    created_at: string;
+    updated_at: string;
+  };
+  framework: {
+    name: string;
+    slug: string;
+    citation: string | null;
+    prompt_addendum: string;
+  } | null;
+  corpus: {
+    documentCount: number;
+    totalWords: number;
+    sha256: string;
+    documents: {
+      id: string;
+      title: string;
+      kind: string | null;
+      word_count: number;
+      page_count: number | null;
+      created_at: string;
+    }[];
+  };
+  codebook: {
+    codeCount: number;
+    rootCount: number;
+    leafCount: number;
+    codes: {
+      id: string;
+      name: string;
+      description: string | null;
+      parent_id: string | null;
+      usage_count: number;
+      color: string;
+      created_at: string;
+    }[];
+  };
+  attributeSchema: {
+    name: string;
+    data_type: string;
+    options: string[] | null;
+  }[];
+  decisions: {
+    id: string;
+    action: string;
+    entity_type: string | null;
+    entity_id: string | null;
+    actor_id: string | null;
+    metadata: Record<string, unknown>;
+    created_at: string;
+  }[];
+  agreement: {
+    coderA: string;
+    coderB: string;
+    cohenK: number;
+    agreement: number;
+    computedAt: string;
+  }[];
+  caveats: string[];
+}
 
 // Survey CSV import — multipart/form-data, like importProject.
 export async function importSurvey(args: {

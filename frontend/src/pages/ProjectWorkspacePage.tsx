@@ -15,6 +15,7 @@ import {
   Activity,
   Microscope,
   Sparkles,
+  FileBadge,
 } from "lucide-react";
 
 import { Skeleton } from "@/components/ui/skeleton";
@@ -31,6 +32,9 @@ import { CodeNetworkPanel } from "@/components/network/CodeNetworkPanel";
 import { FloatingChatWidget } from "@/components/ai/FloatingChatWidget";
 import { MembersPanelGate } from "@/components/projects/MembersPanel";
 import { ExportButton } from "@/components/projects/ExportButton";
+import { TheoryFrameworkSelector } from "@/components/projects/TheoryFrameworkSelector";
+import { ThesisCopilotPanel } from "@/components/ai/ThesisCopilotPanel";
+import { ReproducibilityReportPanel } from "@/components/projects/ReproducibilityReportPanel";
 import { AgreementPanel } from "@/components/agreement/AgreementPanel";
 import { QueryBuilderPanel } from "@/components/query/QueryBuilderPanel";
 import { TextAnalysisPanel } from "@/components/analysis/TextAnalysisPanel";
@@ -52,6 +56,8 @@ const VALID_TABS = [
   "query",
   "analysis",
   "agreement",
+  "copilot",
+  "report",
   "activity",
   "members",
 ] as const;
@@ -101,6 +107,16 @@ const TAB_TITLES: Record<TabId, { title: string; subtitle: string }> = {
   agreement: {
     title: "Acuerdo intercodificadores",
     subtitle: "Mide consistencia entre coders del proyecto.",
+  },
+  copilot: {
+    title: "Copiloto de tesis",
+    subtitle:
+      "Borradores de capítulos enraizados en tu codebook, citas y memos.",
+  },
+  report: {
+    title: "Reporte de reproducibilidad",
+    subtitle:
+      "Snapshot publicable: codebook, decisiones, ICA y hash del corpus.",
   },
   activity: { title: "Actividad", subtitle: "Bitácora de cambios del proyecto." },
   members: { title: "Miembros", subtitle: "Equipo y permisos." },
@@ -165,6 +181,8 @@ export default function ProjectWorkspacePage() {
         icon: ShieldCheck,
         tone: "rose",
       },
+      { id: "copilot", label: "Copiloto", icon: Sparkles, tone: "violet" },
+      { id: "report", label: "Reporte", icon: FileBadge, tone: "violet" },
       { id: "activity", label: "Actividad", icon: Activity, tone: "default" },
       { id: "members", label: "Miembros", icon: Users, tone: "default" },
     ],
@@ -231,6 +249,12 @@ export default function ProjectWorkspacePage() {
               <StatPill icon={NotebookPen} value={project.memo_count} label="memos" />
 
               <div className="mx-1 h-5 w-px bg-border" aria-hidden />
+
+              <TheoryFrameworkSelector
+                projectId={projectId}
+                activeFrameworkId={project.theory_framework_id ?? null}
+                canEdit={myRole === "owner" || myRole === "admin"}
+              />
 
               <Button
                 variant="outline"
@@ -303,6 +327,10 @@ function PanelOutlet({ tab, projectId }: { tab: TabId; projectId: string }) {
       return <TextAnalysisPanel projectId={projectId} />;
     case "agreement":
       return <AgreementPanel projectId={projectId} />;
+    case "copilot":
+      return <ThesisCopilotPanel projectId={projectId} />;
+    case "report":
+      return <ReproducibilityReportPanel projectId={projectId} />;
     case "activity":
       return <ActivityLogPanel projectId={projectId} />;
     case "members":
@@ -351,6 +379,8 @@ function SectionIcon({ tab }: { tab: TabId }) {
     query: Search,
     analysis: BarChart3,
     agreement: ShieldCheck,
+    copilot: Sparkles,
+    report: FileBadge,
     activity: Activity,
     members: Users,
   };

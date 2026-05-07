@@ -32,7 +32,9 @@ import {
   autoCodePrompt,
   EXTRACT_QUOTATIONS_SYSTEM_PROMPT,
   extractQuotationsPrompt,
+  frameworkAddendum,
 } from "../_shared/prompts.ts";
+import { getActiveFramework } from "../_shared/theory.ts";
 import type { AutoCodePayload, SuggestedCode, SuggestedQuotation } from "../_shared/types.ts";
 
 interface RequestBody {
@@ -298,6 +300,8 @@ async function runAutoCodeJob(input: JobInput) {
     .eq("id", doc.project_id)
     .single();
 
+  const framework = await getActiveFramework(supabase, doc.project_id);
+
   const { data: existingCodes } = await supabase
     .from("codes")
     .select("name, description")
@@ -394,7 +398,7 @@ async function runAutoCodeJob(input: JobInput) {
         },
       ],
       {
-        system: AUTO_CODE_SYSTEM_PROMPT,
+        system: AUTO_CODE_SYSTEM_PROMPT + frameworkAddendum(framework?.prompt_addendum),
         toolName: "submit_codebook",
         toolDescription:
           "Devuelve el libro de códigos propuesto (sin citas — esas vendrán en un segundo paso).",
@@ -508,7 +512,8 @@ async function runAutoCodeJob(input: JobInput) {
           },
         ],
         {
-          system: EXTRACT_QUOTATIONS_SYSTEM_PROMPT,
+          system:
+            EXTRACT_QUOTATIONS_SYSTEM_PROMPT + frameworkAddendum(framework?.prompt_addendum),
           toolName: "submit_quotations",
           toolDescription:
             "Devuelve las citas literales seleccionadas y los códigos asignados.",

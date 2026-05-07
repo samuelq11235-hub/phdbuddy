@@ -13,6 +13,7 @@ import {
   Wand2,
   GitMerge,
   Scissors,
+  ShieldAlert,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -40,6 +41,7 @@ import { AssignToGroupDialog } from "./AssignToGroupDialog";
 import { SmartCodeDrawer } from "./SmartCodeDrawer";
 import { MergeCodesDialog } from "./MergeCodesDialog";
 import { SplitCodeDialog } from "./SplitCodeDialog";
+import { DevilsAdvocateDialog } from "@/components/ai/DevilsAdvocateDialog";
 
 type ViewMode = "tree" | "groups";
 
@@ -505,6 +507,28 @@ function CodeRow({
                       title="Dividir este código en dos"
                     >
                       <Scissors className="h-3.5 w-3.5" />
+                    </Button>
+                  }
+                />
+              ) : null}
+              {node.usage_count >= 2 ? (
+                <DevilsAdvocateDialog
+                  projectId={projectId}
+                  initialClaim={
+                    node.description
+                      ? `${node.name}: ${node.description}`
+                      : `Hallazgo etiquetado como "${node.name}"`
+                  }
+                  source={`Código: ${node.name}`}
+                  trigger={
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7 text-rose-500 hover:bg-rose-500/10"
+                      aria-label="Defensor del diablo"
+                      title="Buscar contraevidencia para este código"
+                    >
+                      <ShieldAlert className="h-3.5 w-3.5" />
                     </Button>
                   }
                 />

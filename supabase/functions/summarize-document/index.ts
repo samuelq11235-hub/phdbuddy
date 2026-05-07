@@ -12,6 +12,8 @@
 import { handlePreflight, jsonResponse, errorResponse } from "../_shared/cors.ts";
 import { getServiceClient, getUserFromRequest } from "../_shared/supabase.ts";
 import { callClaudeTool, CLAUDE_MODEL } from "../_shared/claude.ts";
+import { getActiveFramework } from "../_shared/theory.ts";
+import { frameworkAddendum } from "../_shared/prompts.ts";
 
 interface RequestBody {
   documentId: string;
@@ -161,6 +163,8 @@ Deno.serve(async (req) => {
     .eq("id", doc.project_id)
     .single();
 
+  const framework = await getActiveFramework(supabase, doc.project_id);
+
   const text = doc.full_text.length > MAX_INPUT_CHARS
     ? doc.full_text.slice(0, MAX_INPUT_CHARS)
     : doc.full_text;
@@ -186,7 +190,7 @@ Deno.serve(async (req) => {
         },
       ],
       {
-        system: SUMMARY_SYSTEM_PROMPT,
+        system: SUMMARY_SYSTEM_PROMPT + frameworkAddendum(framework?.prompt_addendum),
         toolName: "submit_summary",
         toolDescription:
           "Devuelve la síntesis estructurada del documento (abstract, temas, actores, citas notables).",

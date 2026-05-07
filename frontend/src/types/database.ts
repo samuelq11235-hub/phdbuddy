@@ -120,6 +120,7 @@ export interface Project {
   research_question: string | null;
   methodology: string | null;
   color: string;
+  theory_framework_id: string | null;
   document_count: number;
   code_count: number;
   quotation_count: number;
@@ -134,6 +135,26 @@ export interface ProjectInsert {
   research_question?: string | null;
   methodology?: string | null;
   color?: string;
+  theory_framework_id?: string | null;
+}
+
+// =====================================================
+// F31 — Theory frameworks
+// =====================================================
+// Both global (project_id null, seeded canonical set) and per-project
+// custom frameworks live in this table. The active framework's
+// `prompt_addendum` is appended to every AI call so auto-coding,
+// summaries, networks and the thesis copilot speak the same dialect.
+export interface TheoryFramework {
+  id: string;
+  project_id: string | null;
+  slug: string;
+  name: string;
+  description: string | null;
+  prompt_addendum: string;
+  citation: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 // =====================================================

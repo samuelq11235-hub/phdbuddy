@@ -10,7 +10,12 @@
 import { handlePreflight, jsonResponse, errorResponse } from "../_shared/cors.ts";
 import { getServiceClient, getUserFromRequest } from "../_shared/supabase.ts";
 import { callClaudeTool } from "../_shared/claude.ts";
-import { RELATIONS_SYSTEM_PROMPT, relationsPrompt } from "../_shared/prompts.ts";
+import {
+  RELATIONS_SYSTEM_PROMPT,
+  frameworkAddendum,
+  relationsPrompt,
+} from "../_shared/prompts.ts";
+import { getActiveFramework } from "../_shared/theory.ts";
 
 interface RequestBody {
   projectId: string;
@@ -172,6 +177,10 @@ Deno.serve(async (req) => {
     .single();
   if (nErr || !network) return errorResponse(nErr?.message ?? "Could not create network", 500);
 
+  // Resolve theoretical framework so the system prompt speaks the right
+  // analytical dialect (Grounded Theory vs CDA vs IPA, etc).
+  const framework = await getActiveFramework(supabase, body.projectId);
+
   // Now ask Claude.
   let toolResult;
   try {
@@ -198,7 +207,7 @@ Deno.serve(async (req) => {
         },
       ],
       {
-        system: RELATIONS_SYSTEM_PROMPT,
+        system: RELATIONS_SYSTEM_PROMPT + frameworkAddendum(framework?.prompt_addendum),
         toolName: "report_code_relations",
         toolDescription:
           "Devuelve un conjunto de relaciones interpretativas entre los códigos del proyecto.",
