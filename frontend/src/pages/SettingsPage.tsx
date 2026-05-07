@@ -54,9 +54,10 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
+    <div className="min-h-0 flex-1 overflow-y-auto bg-surface-2">
+      <div className="mx-auto w-full max-w-3xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Ajustes</h1>
+        <h1 className="text-3xl font-semibold tracking-tight">Ajustes</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Gestiona la información de tu perfil.
         </p>
@@ -119,6 +120,7 @@ export default function SettingsPage() {
           </form>
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }

@@ -47,11 +47,50 @@ export default {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        sidebar: {
+          DEFAULT: "hsl(var(--sidebar))",
+          foreground: "hsl(var(--sidebar-foreground))",
+        },
+        surface: {
+          DEFAULT: "hsl(var(--surface))",
+          2: "hsl(var(--surface-2))",
+        },
+        success: "hsl(var(--success))",
+        warning: "hsl(var(--warning))",
+        info: "hsl(var(--info))",
+        "border-strong": "hsl(var(--border-strong))",
       },
       borderRadius: {
+        xl: "calc(var(--radius) + 4px)",
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
+      },
+      fontFamily: {
+        sans: [
+          "Inter",
+          "ui-sans-serif",
+          "system-ui",
+          "-apple-system",
+          "Segoe UI",
+          "Helvetica Neue",
+          "Arial",
+          "sans-serif",
+        ],
+        mono: [
+          "JetBrains Mono",
+          "ui-monospace",
+          "SFMono-Regular",
+          "Menlo",
+          "Consolas",
+          "monospace",
+        ],
+      },
+      boxShadow: {
+        soft: "0 1px 2px 0 hsl(220 30% 10% / 0.04), 0 1px 1px 0 hsl(220 30% 10% / 0.02)",
+        elevated:
+          "0 4px 12px -2px hsl(220 30% 10% / 0.08), 0 2px 6px -2px hsl(220 30% 10% / 0.04)",
+        focus: "0 0 0 3px hsl(var(--ring) / 0.25)",
       },
       keyframes: {
         "accordion-down": {

@@ -57,9 +57,9 @@ export function ProjectCard({ project }: { project: Project | ProjectWithRole })
   }
 
   return (
-    <Card className="group relative overflow-hidden transition-all hover:shadow-md">
+    <Card className="group relative overflow-hidden transition-all duration-200 hover:-translate-y-0.5 hover:border-border-strong hover:shadow-elevated">
       <Link to={`/app/p/${project.id}`} className="block">
-        <div className="h-1.5 w-full" style={{ backgroundColor: project.color }} />
+        <div className="h-1 w-full" style={{ backgroundColor: project.color }} />
         <CardHeader className="pb-3">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 flex-1">
@@ -84,7 +84,7 @@ export function ProjectCard({ project }: { project: Project | ProjectWithRole })
             </span>
           )}
         </CardContent>
-        <CardFooter className="flex items-center gap-4 border-t bg-muted/20 py-2.5 text-xs text-muted-foreground">
+        <CardFooter className="flex items-center gap-4 border-t border-border bg-surface-2 px-6 py-2.5 text-xs text-muted-foreground">
           <span className="inline-flex items-center gap-1.5">
             <FileText className="h-3.5 w-3.5" />
             {project.document_count} {pluralize("doc", "docs", project.document_count)}

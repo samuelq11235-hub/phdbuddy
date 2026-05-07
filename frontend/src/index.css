@@ -2,50 +2,98 @@
 @tailwind components;
 @tailwind utilities;
 
+/* -----------------------------------------------------------------------
+ * Design tokens
+ * --------------------------------------------------------------------
+ * The palette is built around a single warm-violet primary on a cool
+ * neutral canvas. We layer surfaces (`--surface`, `--surface-2`) so the
+ * IDE-style shell has subtle depth without resorting to heavy borders or
+ * shadows. The neutrals lean slightly toward slate to feel editorial.
+ * ----------------------------------------------------------------------- */
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    /* Page canvas */
+    --background: 220 20% 98.5%;
+    --foreground: 222 35% 12%;
+
+    /* Raised surfaces */
     --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card-foreground: 222 35% 12%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
+    --popover-foreground: 222 35% 12%;
+
+    /* Sidebar / activity rail / panels */
+    --sidebar: 220 22% 96%;
+    --sidebar-foreground: 222 25% 32%;
+    --surface: 0 0% 100%;
+    --surface-2: 220 20% 97%;
+    --hover: 222 30% 95%;
+
+    /* Brand */
     --primary: 262 83% 58%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
+    --primary-foreground: 0 0% 100%;
+    --primary-muted: 262 90% 96%;
+
+    /* Secondary / muted / accent */
+    --secondary: 220 18% 95%;
+    --secondary-foreground: 222 30% 15%;
+    --muted: 220 18% 95%;
+    --muted-foreground: 220 12% 44%;
+    --accent: 220 18% 94%;
+    --accent-foreground: 222 30% 15%;
+
+    /* Status */
+    --destructive: 0 80% 58%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 152 65% 38%;
+    --warning: 38 92% 52%;
+    --info: 220 90% 56%;
+
+    /* Lines + focus */
+    --border: 220 18% 90%;
+    --border-strong: 220 18% 84%;
+    --input: 220 18% 88%;
     --ring: 262 83% 58%;
-    --radius: 0.5rem;
+
+    --radius: 0.625rem;
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 263 70% 65%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 263 70% 65%;
+    --background: 224 30% 7%;
+    --foreground: 220 20% 95%;
+
+    --card: 224 28% 10%;
+    --card-foreground: 220 20% 95%;
+    --popover: 224 28% 11%;
+    --popover-foreground: 220 20% 95%;
+
+    --sidebar: 224 30% 9%;
+    --sidebar-foreground: 220 14% 70%;
+    --surface: 224 28% 11%;
+    --surface-2: 224 26% 13%;
+    --hover: 224 24% 16%;
+
+    --primary: 263 80% 70%;
+    --primary-foreground: 224 30% 8%;
+    --primary-muted: 262 60% 20%;
+
+    --secondary: 224 22% 17%;
+    --secondary-foreground: 220 20% 95%;
+    --muted: 224 22% 16%;
+    --muted-foreground: 220 14% 65%;
+    --accent: 224 22% 18%;
+    --accent-foreground: 220 20% 95%;
+
+    --destructive: 0 70% 55%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 152 60% 50%;
+    --warning: 38 90% 60%;
+    --info: 220 85% 65%;
+
+    --border: 224 18% 20%;
+    --border-strong: 224 18% 28%;
+    --input: 224 18% 22%;
+    --ring: 263 80% 70%;
   }
 }
 
@@ -53,14 +101,114 @@
   * {
     @apply border-border;
   }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
   body {
-    @apply bg-background text-foreground;
-    font-feature-settings: "rlig" 1, "calt" 1;
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1, "cv11" 1;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Subtle, thin, non-intrusive scrollbars across the app. They only
+     appear over scrollable content so they don't compete visually with
+     the rest of the chrome. */
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--border-strong));
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--muted-foreground) / 0.55);
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border-strong)) transparent;
+  }
+
+  ::selection {
+    background-color: hsl(var(--primary) / 0.25);
+    color: hsl(var(--foreground));
+  }
+
+  /* Polished focus ring for keyboard users only. */
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring) / 0.7);
+    outline-offset: 2px;
+    border-radius: calc(var(--radius) - 2px);
+  }
+
+  kbd {
+    @apply inline-flex h-5 items-center rounded border border-border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground;
   }
 }
 
 @layer utilities {
   .text-balance {
     text-wrap: balance;
+  }
+
+  /* Surfaces with subtle depth, used by panels in the workspace. */
+  .surface {
+    background-color: hsl(var(--surface));
+  }
+  .surface-2 {
+    background-color: hsl(var(--surface-2));
+  }
+  .surface-sidebar {
+    background-color: hsl(var(--sidebar));
+    color: hsl(var(--sidebar-foreground));
+  }
+
+  /* Soft glow used on the brand mark and the AI chat trigger. */
+  .glow-primary {
+    box-shadow:
+      0 0 0 1px hsl(var(--primary) / 0.25),
+      0 8px 24px -8px hsl(var(--primary) / 0.45);
+  }
+
+  /* Vertical and horizontal hairline separators that respect tokens. */
+  .hairline-x {
+    border-top: 1px solid hsl(var(--border));
+  }
+  .hairline-y {
+    border-left: 1px solid hsl(var(--border));
+  }
+
+  /* A tasteful divider that fades on the edges. Used inside dropdowns. */
+  .fade-divider {
+    height: 1px;
+    background: linear-gradient(
+      to right,
+      transparent,
+      hsl(var(--border)) 20%,
+      hsl(var(--border)) 80%,
+      transparent
+    );
+  }
+
+  /* Hide native scrollbar but keep scrolling behaviour. Useful for tab
+     rails and similar horizontal lists. */
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    scrollbar-width: none;
   }
 }
